@@ -5,10 +5,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
 
-from app.database.requests import set_user, update_user, get_card, get_user, get_shop_description
+from app.database.requests import (
+    set_user, update_user, get_card, get_user, get_shop_description, get_shop_contacts
+)
 import app.keyboards as kb
 import app.database.requests_cart as rqc
 from app.validation import validation_phone
+from app.timezone import now_msk
 
 
 import asyncio
@@ -29,6 +32,9 @@ client = Router()
 logger = logging.getLogger(__name__)
 
 
+PICKUP_TEXT = "Самовывоз"
+
+
 ctx = ssl.create_default_context(cafile=certifi.where())
 geolocator = Nominatim(user_agent="TelegramBotShop", ssl_context=ctx)
 
@@ -38,32 +44,27 @@ async def cmd_start(message: Message, state: FSMContext):
     is_user = await set_user(message.from_user.id)
     if not is_user:  # если нет юзера, то добавим его в БД
         await message.answer(
-            text="Добро пожаловать! \nПройдите процесс регистрации...",
+            text="👋 Добро пожаловать!\nПройдите, пожалуйста, регистрацию.",
             reply_markup=await kb.clients_name(message.from_user.first_name),
         )
         await state.set_state("req_name")
     else:  # Если есть юзер
         await message.answer(
-            f"{await get_shop_description()}\n\nИспользуя кнопки ниже, ознакомьтесь с ассортиментом",
+            f"🛍 {await get_shop_description()}\n\nИспользуя кнопки ниже, ознакомьтесь с ассортиментом 👇",
             reply_markup=kb.menu,
         )
 
 
-@client.message(F.text == "Контакты")
+@client.message(F.text == kb.BTN_CONTACTS)
 async def contact(message: Message):
-    text_contact = (
-        f"Связывайтесь с менеджером в любом формате и в любое для вас время:\n"
-        f"Номер телефона: +7981245678\n"
-        f"Телеграмм: @manaka2"
-    )
-    await message.answer(text=text_contact)
+    await message.answer(f"📞 Контакты\n\n{await get_shop_contacts()}")
 
 
 @client.message(StateFilter("req_name"))  # Рег имени и создания состояние номера
 async def qet_req_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text.capitalize())
     await message.answer(
-        "Введите ваш номер телефона без пробелов и скобок!\nПример: +79817793276",
+        "📱 Введите ваш номер телефона без пробелов и скобок.\nПример: +79817793276",
         reply_markup=await kb.clients_phone(),
     )
     await state.set_state("req_phone")
@@ -74,7 +75,7 @@ async def qet_req_phone_numbers(message: Message, state: FSMContext):
     await state.update_data(phone_number=message.contact.phone_number)
     data = await state.get_data()
     await update_user(message.from_user.id, data["name"], data["phone_number"])
-    await message.answer(text="Вы успешно зарегестрировались!", reply_markup=kb.menu)
+    await message.answer(text="✅ Вы успешно зарегистрировались!", reply_markup=kb.menu)
     await state.clear()
 
 
@@ -87,32 +88,32 @@ async def qet_req_phone_number(message: Message, state: FSMContext):
     if await validation_phone(data["phone_number"]):  # Валидация номера телефона успех
         await update_user(message.from_user.id, data["name"], data["phone_number"])
         await message.answer(
-            text="Вы успешно зарегестрировались!", reply_markup=kb.menu
+            text="✅ Вы успешно зарегистрировались!", reply_markup=kb.menu
         )
         await state.clear()
     else:  # провал валидации, открываем заново регистрацию
         await state.clear()
         await message.answer(
-            text="Некоректно введен номер телефона, пройдите регистрацию еще раз!",
+            text="❌ Некорректно введён номер телефона, пройдите регистрацию ещё раз.",
             reply_markup=await kb.clients_name(message.from_user.first_name),
         )
         await state.set_state("req_name")
 
 
 def render_cart_text(cart_items: list, total: int) -> str:
-    lines = [f"• {item['name']} × {item['quantity']} = {item['total']} RUB" for item in cart_items]
-    return "🛒 Ваша корзина:\n\n" + "\n".join(lines) + f"\n\nИтого: {total} RUB"
+    lines = [f"• {item['name']} × {item['quantity']} = {item['total']} ₽" for item in cart_items]
+    return "🛒 Ваша корзина:\n\n" + "\n".join(lines) + f"\n\n💰 Итого: {total} ₽"
 
 
 async def show_cart(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     """Текст и клавиатура корзины, общие для показа и обновления после кнопок"""
     cart_items, total = await rqc.get_cart_details(user_id)
     if not cart_items:
-        return "Ваша корзина пуста.", kb.empty_cart
+        return "🛒 Ваша корзина пуста.", kb.empty_cart
     return render_cart_text(cart_items, total), kb.get_cart_keyboard(cart_items)
 
 
-@client.message(F.text == "Корзина")
+@client.message(F.text == kb.BTN_CART)
 async def get_cart_user(message: Message):
     text, keyboard = await show_cart(message.from_user.id)
     await message.answer(text, reply_markup=keyboard)
@@ -149,14 +150,14 @@ async def cart_decrease(callback: CallbackQuery):
 @client.callback_query(F.data.startswith("cart_del_"))
 async def cart_remove_item(callback: CallbackQuery):
     await rqc.remove_from_cart(callback.from_user.id, int(callback.data.split("_")[-1]))
-    await callback.answer("Товар удалён")
+    await callback.answer("🗑 Товар удалён")
     await refresh_cart_message(callback)
 
 
 @client.callback_query(F.data == "cart_clear")
 async def cart_clear(callback: CallbackQuery):
     await rqc.clear_cart(callback.from_user.id)
-    await callback.answer("Корзина очищена")
+    await callback.answer("🧹 Корзина очищена")
     await refresh_cart_message(callback)
 
 
@@ -170,20 +171,20 @@ async def main_menu(callback: CallbackQuery):
     await callback.answer()
     # Reply-клавиатуру нельзя прикрепить через edit, поэтому отправляем новое сообщение
     await callback.message.delete()
-    await callback.message.answer("Главное меню", reply_markup=kb.menu)
+    await callback.message.answer("🏠 Главное меню", reply_markup=kb.menu)
 
 
 @client.callback_query(F.data == "categories")  # это кнопка назад
-@client.message(F.text == "Каталог")  # это нажатие на кнопку
+@client.message(F.text == kb.BTN_CATALOG)  # это нажатие на кнопку
 async def catalog(event: Message | CallbackQuery):
     if isinstance(event, Message):
         await event.answer(
-            "Выберите категорию товара", reply_markup=await kb.categories()
+            "🛍 Выберите категорию товара", reply_markup=await kb.categories()
         )
     else:
-        await event.answer("Вы вурнулись назад")
+        await event.answer()
         await event.message.edit_text(
-            "Выберите категорию товаров", reply_markup=await kb.categories()
+            "🛍 Выберите категорию товара", reply_markup=await kb.categories()
         )
 
 
@@ -194,9 +195,9 @@ async def cards(callback: CallbackQuery):
     keyboard = await kb.cards(category_id)
     if callback.message.photo:  # из карточки товара: фото нельзя превратить в текст
         await callback.message.delete()
-        await callback.message.answer("Выберите товар", reply_markup=keyboard)
+        await callback.message.answer("📦 Выберите товар", reply_markup=keyboard)
     else:
-        await callback.message.edit_text("Выберите товар", reply_markup=keyboard)
+        await callback.message.edit_text("📦 Выберите товар", reply_markup=keyboard)
 
 
 @client.callback_query(F.data.startswith("card_"))
@@ -205,11 +206,11 @@ async def card_info(callback: CallbackQuery):
     card_id = int(callback.data.split("_")[1])
     card = await get_card(card_id)
     if not card:
-        await callback.message.answer("Этот товар больше не продаётся.")
+        await callback.message.answer("😔 Этот товар больше не продаётся.")
         return
     await callback.message.answer_photo(
         photo=card.image,
-        caption=f"{card.name}\n\n{card.description}\n\n{card.price}RUB",
+        caption=f"📦 {card.name}\n\n{card.description}\n\n💰 Цена: {card.price} ₽",
         reply_markup=await kb.back_to_categories(card.category_id, card_id),
     )
 
@@ -223,35 +224,38 @@ async def send_order_to_admin_chat(bot, tg_user, delivery_info: str) -> bool:
 
     user = await get_user(tg_user.id)
     items_text = "\n".join(
-        f"• {item['name']} (ID {item['id']}) × {item['quantity']} = {item['total']} RUB"
+        f"• {item['name']} (ID {item['id']}) × {item['quantity']} = {item['total']} ₽"
         for item in cart_items
     )
+    username = f"@{tg_user.username}" if tg_user.username else "без username"
+    delivery_icon = "🏬" if delivery_info == PICKUP_TEXT else "🚚"
     info = (
-        f"Новый заказ:\n\n"
-        f"Пользователь: {user.name}, @{tg_user.username} (ID: {user.tg_id})\n"
-        f"Номер телефона: {user.phone_number}\n"
-        f"Получение: {delivery_info}\n\n"
-        f"Состав заказа:\n{items_text}\n\n"
-        f"Итого: {total} RUB"
+        f"🆕 Новый заказ\n"
+        f"🕒 {now_msk():%d.%m.%Y %H:%M} (МСК)\n\n"
+        f"👤 {user.name}, {username} (ID: {user.tg_id})\n"
+        f"📞 {user.phone_number}\n"
+        f"{delivery_icon} {delivery_info}\n\n"
+        f"📦 Состав заказа:\n{items_text}\n\n"
+        f"💰 Итого: {total} ₽"
     )
     await bot.send_message(int(os.getenv("GROUP_ID")), info)
     await rqc.clear_cart(tg_user.id)
-    logger.info("Заказ от пользователя %s на сумму %s RUB (%s)", tg_user.id, total, delivery_info.split(",")[0])
+    logger.info("Заказ от пользователя %s на сумму %s ₽ (%s)", tg_user.id, total, delivery_info.split(",")[0])
     return True
 
 
 async def finish_order(message: Message, state: FSMContext, tg_user, delivery_info: str):
     is_sent = await send_order_to_admin_chat(message.bot, tg_user, delivery_info)
     if is_sent:
-        await message.answer("Спасибо, ваш заказ принят!", reply_markup=kb.menu)
+        await message.answer("✅ Спасибо, ваш заказ принят! Скоро с вами свяжется менеджер.", reply_markup=kb.menu)
     else:
-        await message.answer("Корзина пуста, добавьте товары через каталог.", reply_markup=kb.menu)
+        await message.answer("🛒 Корзина пуста, добавьте товары через каталог.", reply_markup=kb.menu)
     await state.clear()
 
 
 async def ask_delivery_type(callback: CallbackQuery):
     await callback.message.answer(
-        "Как вы хотите получить заказ?", reply_markup=kb.delivery_choice
+        "🚚 Как вы хотите получить заказ?", reply_markup=kb.delivery_choice
     )
 
 
@@ -266,7 +270,7 @@ async def client_buy_callback(callback: CallbackQuery):
 async def checkout(callback: CallbackQuery):
     cart_items, _ = await rqc.get_cart_details(callback.from_user.id)
     if not cart_items:
-        await callback.answer("Корзина пуста", show_alert=True)
+        await callback.answer("🛒 Корзина пуста", show_alert=True)
         return
     await callback.answer()
     await ask_delivery_type(callback)
@@ -275,7 +279,7 @@ async def checkout(callback: CallbackQuery):
 @client.callback_query(F.data == "order_pickup")
 async def order_pickup(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await finish_order(callback.message, state, callback.from_user, "Самовывоз")
+    await finish_order(callback.message, state, callback.from_user, PICKUP_TEXT)
 
 
 @client.callback_query(F.data == "order_delivery")
@@ -283,7 +287,7 @@ async def order_delivery(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state("waiting_for_address")
     await callback.message.answer(
-        "Отправьте ваш адрес доставки.\nПример: г. Санкт-Петербург, ул. Колотушкина д.12, к/лит, кв. 1",
+        "📍 Отправьте ваш адрес доставки.\nПример: г. Санкт-Петербург, ул. Колотушкина д.12, к/лит, кв. 1",
         reply_markup=await kb.clients_location(),
     )
 

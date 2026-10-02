@@ -14,6 +14,10 @@ class EditShopDescription(StatesGroup):
     waiting_for_text = State()
 
 
+class EditShopContacts(StatesGroup):
+    waiting_for_text = State()
+
+
 class AddCard(StatesGroup):
     category = State()
     name = State()
@@ -22,10 +26,16 @@ class AddCard(StatesGroup):
     photo = State()
 
 
+# Тексты кнопок главного меню: хендлеры в client.py ловят сообщения по этим же константам
+BTN_CATALOG = "🛍 Каталог"
+BTN_CONTACTS = "📞 Контакты"
+BTN_CART = "🛒 Корзина"
+
+
 menu = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text='Каталог')],
-    [KeyboardButton(text='Контакты')],
-    [KeyboardButton(text="Корзина")]
+    [KeyboardButton(text=BTN_CATALOG)],
+    [KeyboardButton(text=BTN_CONTACTS)],
+    [KeyboardButton(text=BTN_CART)]
 ],
     resize_keyboard=True,
     input_field_placeholder='Выберите пункт меню...')
@@ -38,7 +48,7 @@ def get_cart_keyboard(cart_items: list):
     for item in cart_items:
         builder.row(
             InlineKeyboardButton(
-                text=f"{item['name']} | {item['total']}₽",
+                text=f"{item['name']} | {item['total']} ₽",
                 callback_data="ignore"
             )
         )
@@ -68,9 +78,10 @@ empty_cart = InlineKeyboardMarkup(
 
 inline_admin_panel = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="Добавить что-то", callback_data='add_product')], 
-        [InlineKeyboardButton(text="Удалить что-то", callback_data="remove_product")],
-        [InlineKeyboardButton(text="Изменить описание магазина", callback_data="edit_shop_description")]]
+        [InlineKeyboardButton(text="➕ Добавить", callback_data='add_product')],
+        [InlineKeyboardButton(text="🗑 Удалить", callback_data="remove_product")],
+        [InlineKeyboardButton(text="📝 Изменить описание магазина", callback_data="edit_shop_description")],
+        [InlineKeyboardButton(text="📞 Изменить контакты", callback_data="edit_shop_contacts")]]
 )
 
 
@@ -84,16 +95,16 @@ delivery_choice = InlineKeyboardMarkup(
 
 panel_add = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="Добавить категорию", callback_data="add_category")],
-        [InlineKeyboardButton(text="Добавить карточку товара", callback_data="add_card")]
+        [InlineKeyboardButton(text="📁 Добавить категорию", callback_data="add_category")],
+        [InlineKeyboardButton(text="📦 Добавить карточку товара", callback_data="add_card")]
     ]
 )
 
 
 panel_del = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="Удалить категорию", callback_data="del_category")],
-        [InlineKeyboardButton(text="Удалить карточку товара", callback_data="del_card")]
+        [InlineKeyboardButton(text="🗑 Удалить категорию", callback_data="del_category")],
+        [InlineKeyboardButton(text="🗑 Удалить карточку товара", callback_data="del_card")]
     ]
 )
 
@@ -106,7 +117,7 @@ async def clients_name(name):
 
 async def clients_phone():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text='Поделиться контактом',
+        [KeyboardButton(text='📱 Поделиться контактом',
                         request_contact=True)]
     ],
         resize_keyboard=True,
@@ -114,7 +125,7 @@ async def clients_phone():
 
 
 async def clients_location():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='Отправить свою текущую геопозицию',
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text='📍 Отправить геопозицию',
                                                          request_location=True)]],
                                 resize_keyboard=True,
                                 input_field_placeholder='Введите адрес или отправьте геолокацию')
@@ -160,10 +171,10 @@ async def cards(category_id: int):
     keyboard = InlineKeyboardBuilder()
     all_cards = await get_cards_by_category(category_id)
     for card in all_cards:
-        keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price}RUB',
+        keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price} ₽',
                                           callback_data=f'card_{card.id}'))
     keyboard.row(InlineKeyboardButton(
-        text='Назад', callback_data='categories'))
+        text='🔙 Назад', callback_data='categories'))
     return keyboard.as_markup()
 
 
@@ -171,18 +182,18 @@ async def cards_admin(category_id: int):
     keyboard = InlineKeyboardBuilder()
     all_cards = await get_cards_by_category(category_id)
     for card in all_cards:
-        keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price}RUB',
+        keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price} ₽',
                                           callback_data=f'carda_{card.id}'))
     keyboard.row(InlineKeyboardButton(
-        text='Назад', callback_data='categories'))
+        text='🔙 Назад', callback_data='categories'))
     return keyboard.as_markup()
 
 
 async def back_to_categories(category_id: int, card_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='🛒 В корзину', callback_data=f'add_to_cart_{card_id}')],
-        [InlineKeyboardButton(text='Купить сейчас', callback_data=f'buy_{card_id}')],
+        [InlineKeyboardButton(text='⚡ Купить сейчас', callback_data=f'buy_{card_id}')],
         [InlineKeyboardButton(
-            text='Назад', callback_data=f'category_{category_id}')]
+            text='🔙 Назад', callback_data=f'category_{category_id}')]
     ])
 

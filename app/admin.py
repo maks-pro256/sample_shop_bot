@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 import app.keyboards as kb
 from app.filters import IsAdmin
 import app.database.requests_admin as rq
-from app.database.requests import get_shop_description
+from app.database.requests import get_shop_description, get_shop_contacts
 import logging
 
 
@@ -24,21 +24,21 @@ logger = logging.getLogger(__name__)
 
 @admin.message(Command("admin"))
 async def admin_panel(message: Message):
-    await message.answer(text="Админ-панель магазина:",
+    await message.answer(text="⚙️ Админ-панель магазина:",
                          reply_markup=kb.inline_admin_panel)
 
 
 @admin.callback_query(F.data == "add_product")
 async def add_product(callback: CallbackQuery):
-    await callback.answer("добавить")
-    await callback.message.edit_text(text="Что нужно добавить?", 
+    await callback.answer("")
+    await callback.message.edit_text(text="➕ Что нужно добавить?", 
                                   reply_markup=kb.panel_add)
 
 
 @admin.callback_query(F.data == "add_category")
 async def add_category_name(callbback: CallbackQuery, state: FSMContext):
-    await callbback.answer("категории")
-    await callbback.message.answer("Введите название категории:")
+    await callbback.answer("")
+    await callbback.message.answer("✏️ Введите название категории:")
     await state.set_state(kb.AddCategory.waiting_for_title)
 
 
@@ -66,7 +66,7 @@ async def add_category_base(message: Message, state: FSMContext):
 @admin.callback_query(F.data == "add_card")
 async def add_card_category(callback: CallbackQuery, state: FSMContext):
     await callback.answer("")
-    await callback.message.answer("Выберите категорию товара:", 
+    await callback.message.answer("📁 Выберите категорию товара:", 
                                   reply_markup= await kb.categories_admin())
     await state.set_state(kb.AddCard.category)
 
@@ -76,14 +76,14 @@ async def add_card_name(callback: CallbackQuery, state: FSMContext):
     await callback.answer("")
     category_id = int(callback.data.split("_")[1])
     await state.update_data(category_id=category_id)
-    await callback.message.answer("Введите название товара:")
+    await callback.message.answer("✏️ Введите название товара:")
     await state.set_state(kb.AddCard.name)
 
 
 @admin.message(kb.AddCard.name)
 async def add_card_price(message: Message, state: FSMContext):
     await state.update_data(name=message.text.strip())
-    await message.answer("Введите цену товара:")
+    await message.answer("💰 Введите цену товара (целым числом):")
     await state.set_state(kb.AddCard.price)
 
 
@@ -94,14 +94,14 @@ async def add_card_description(message: Message, state: FSMContext):
         await message.answer("❌ Цена должна быть целым числом. Введите снова:")
         return
     await state.update_data(price=int(price))
-    await message.answer("Напишите описание товара:")
+    await message.answer("📝 Напишите описание товара:")
     await state.set_state(kb.AddCard.description)
 
 
 @admin.message(kb.AddCard.description)
 async def add_card_photo(message: Message, state: FSMContext):
     await state.update_data(description=message.text.strip())
-    await message.answer("Отправьте фотку товара:")
+    await message.answer("🖼 Отправьте фото товара:")
     await state.set_state(kb.AddCard.photo)
 
 
@@ -113,7 +113,7 @@ async def add_card_(message: Message, state: FSMContext):
         data["category_id"], data["name"], data["price"], data["description"], data["photo"]
     )
     if is_added:
-        await message.answer("Карточка успешно создана!")
+        await message.answer("✅ Карточка успешно создана!")
     else:
         await message.answer("❌ Не удалось создать карточку, подробности в логах.")
     await state.clear()
@@ -127,13 +127,13 @@ async def add_card_photo_invalid(message: Message):
 @admin.callback_query(F.data == "remove_product")
 async def delete_product(callback: CallbackQuery):
     await callback.answer("")
-    await callback.message.edit_text("Выберите:", reply_markup=kb.panel_del)
+    await callback.message.edit_text("🗑 Что нужно удалить?", reply_markup=kb.panel_del)
 
 
 @admin.callback_query(F.data == "del_card")
 async def delete_card(callback: CallbackQuery):
     await callback.answer("")
-    await callback.message.answer("Выберите категорию, в которой карточка:",
+    await callback.message.answer("📁 Выберите категорию, в которой карточка:",
                                   reply_markup=await kb.categories_admin_del())
 
 
@@ -141,7 +141,7 @@ async def delete_card(callback: CallbackQuery):
 async def get_category_name(callback: CallbackQuery):
     await callback.answer("")
     category_id = int(callback.data.split("_")[1])
-    await callback.message.answer("Выберите карточку для удаления:",
+    await callback.message.answer("🗑 Выберите карточку для удаления:",
                                   reply_markup=await kb.cards_admin(category_id))
 
 
@@ -151,16 +151,16 @@ async def get_card_name(callback: CallbackQuery):
     card_id = int(callback.data.split("_")[1])
     try:
         await rq.del_card_database(card_id)
-        await callback.message.answer("Успешно удалено!")
+        await callback.message.answer("✅ Успешно удалено!")
     except Exception as e:
-        await callback.message.answer(f"Произошла ошибка '{e}'.")
+        await callback.message.answer(f"❌ Произошла ошибка '{e}'.")
 
 
 @admin.callback_query(F.data == "del_category")
 async def del_category_name(callback: CallbackQuery):
     await callback.answer("")
     await callback.message.answer(
-        "Выберите категорию для удаления (при удалении категории и все карточки этой категории тоже удаляются!):",
+        "⚠️ Выберите категорию для удаления (карточки этой категории тоже удалятся!):",
                                   reply_markup=await kb.categories_admin_2del()
     )
 
@@ -171,32 +171,63 @@ async def del_category(callback: CallbackQuery):
     category_id = int(callback.data.split("_")[1])
     try:
         await rq.delete_category_database(category_id)
-        await callback.message.answer("Успешно удалено!")
+        await callback.message.answer("✅ Успешно удалено!")
     except Exception as e:
-        await callback.message.answer(f"Не удалось удалить, ошибка: '{e}'")
+        await callback.message.answer(f"❌ Не удалось удалить, ошибка: '{e}'")
 
-MAX_DESCRIPTION_LENGTH = 1000
+MAX_SETTING_TEXT_LENGTH = 1000
+
+
+async def ask_new_setting_text(callback: CallbackQuery, state: FSMContext, new_state, title: str, current_text: str):
+    await callback.answer("")
+    await callback.message.answer(
+        f"{title}\n\n{current_text}\n\n"
+        f"✏️ Отправьте новый текст (до {MAX_SETTING_TEXT_LENGTH} символов):"
+    )
+    await state.set_state(new_state)
+
+
+def is_valid_setting_text(text: str) -> bool:
+    return 0 < len(text) <= MAX_SETTING_TEXT_LENGTH
 
 
 @admin.callback_query(F.data == "edit_shop_description")
 async def edit_shop_description_start(callback: CallbackQuery, state: FSMContext):
-    await callback.answer("")
-    current_description = await get_shop_description()
-    await callback.message.answer(
-        f"Текущее описание:\n\n{current_description}\n\n"
-        f"Отправьте новый текст (до {MAX_DESCRIPTION_LENGTH} символов):"
+    await ask_new_setting_text(
+        callback, state, kb.EditShopDescription.waiting_for_text,
+        "📝 Текущее описание:", await get_shop_description()
     )
-    await state.set_state(kb.EditShopDescription.waiting_for_text)
 
 
 @admin.message(kb.EditShopDescription.waiting_for_text, F.text)
 async def edit_shop_description_save(message: Message, state: FSMContext):
     new_description = message.text.strip()
-    if not new_description or len(new_description) > MAX_DESCRIPTION_LENGTH:
+    if not is_valid_setting_text(new_description):
         await message.answer(
-            f"❌ Описание должно быть от 1 до {MAX_DESCRIPTION_LENGTH} символов. Введите снова:"
+            f"❌ Описание должно быть от 1 до {MAX_SETTING_TEXT_LENGTH} символов. Введите снова:"
         )
         return
     await rq.set_shop_description(new_description)
     await message.answer("✅ Описание магазина обновлено!")
+    await state.clear()
+
+
+@admin.callback_query(F.data == "edit_shop_contacts")
+async def edit_shop_contacts_start(callback: CallbackQuery, state: FSMContext):
+    await ask_new_setting_text(
+        callback, state, kb.EditShopContacts.waiting_for_text,
+        "📞 Текущие контакты:", await get_shop_contacts()
+    )
+
+
+@admin.message(kb.EditShopContacts.waiting_for_text, F.text)
+async def edit_shop_contacts_save(message: Message, state: FSMContext):
+    new_contacts = message.text.strip()
+    if not is_valid_setting_text(new_contacts):
+        await message.answer(
+            f"❌ Текст контактов должен быть от 1 до {MAX_SETTING_TEXT_LENGTH} символов. Введите снова:"
+        )
+        return
+    await rq.set_shop_contacts(new_contacts)
+    await message.answer("✅ Контакты обновлены!")
     await state.clear()

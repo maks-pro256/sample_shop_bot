@@ -1,12 +1,14 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from aiogram import Bot, Dispatcher
 
 
 from app.client import client
 from app.admin import admin
 from app.database.models import init_models
+from app.timezone import MSK
 
 
 from dotenv import load_dotenv
@@ -15,6 +17,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# Время в логах по Москве независимо от часового пояса сервера
+logging.Formatter.converter = staticmethod(
+    lambda timestamp: datetime.fromtimestamp(timestamp, MSK).timetuple()
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",

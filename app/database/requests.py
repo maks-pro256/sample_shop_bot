@@ -3,13 +3,23 @@ from sqlalchemy import select, update
 
 
 SHOP_DESCRIPTION_KEY = "description"
+SHOP_CONTACTS_KEY = "contacts"
 DEFAULT_SHOP_DESCRIPTION = "Добро пожаловать в наш магазин!"
+DEFAULT_SHOP_CONTACTS = "Контакты пока не добавлены, скоро здесь появится информация."
+
+
+async def get_setting(key: str, default: str) -> str:
+    async with async_session() as session:
+        setting = await session.get(ShopSetting, key)
+        return setting.value if setting else default
 
 
 async def get_shop_description() -> str:
-    async with async_session() as session:
-        setting = await session.get(ShopSetting, SHOP_DESCRIPTION_KEY)
-        return setting.value if setting else DEFAULT_SHOP_DESCRIPTION
+    return await get_setting(SHOP_DESCRIPTION_KEY, DEFAULT_SHOP_DESCRIPTION)
+
+
+async def get_shop_contacts() -> str:
+    return await get_setting(SHOP_CONTACTS_KEY, DEFAULT_SHOP_CONTACTS)
 
 
 async def set_user(tg_id):

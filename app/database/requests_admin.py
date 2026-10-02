@@ -1,5 +1,5 @@
 from app.database.models import async_session, Category, Card, User, ShopSetting
-from app.database.requests import SHOP_DESCRIPTION_KEY
+from app.database.requests import SHOP_DESCRIPTION_KEY, SHOP_CONTACTS_KEY
 from sqlalchemy import select, insert, delete, func
 from sqlalchemy.exc import SQLAlchemyError,IntegrityError
 import logging
@@ -80,11 +80,19 @@ async def delete_category_database(category_id: int):
         await session.commit()
 
 
-async def set_shop_description(text: str):
+async def set_setting(key: str, value: str):
     async with async_session() as session:
-        setting = await session.get(ShopSetting, SHOP_DESCRIPTION_KEY)
+        setting = await session.get(ShopSetting, key)
         if setting:
-            setting.value = text
+            setting.value = value
         else:
-            session.add(ShopSetting(key=SHOP_DESCRIPTION_KEY, value=text))
+            session.add(ShopSetting(key=key, value=value))
         await session.commit()
+
+
+async def set_shop_description(text: str):
+    await set_setting(SHOP_DESCRIPTION_KEY, text)
+
+
+async def set_shop_contacts(text: str):
+    await set_setting(SHOP_CONTACTS_KEY, text)

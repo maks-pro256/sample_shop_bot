@@ -31,24 +31,15 @@ menu = ReplyKeyboardMarkup(keyboard=[
     input_field_placeholder='Выберите пункт меню...')
 
 
-def get_product_keyboard_with_cart(card_id: int):
-    """Клавиатура товара с кнопкой корзины"""
-    builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Добавить в корзину", callback_data=f"add_to_cart_{card_id}")
-    builder.button(text="🔙 Назад", callback_data="back_to_cards")
-    builder.adjust(1)
-    return builder.as_markup()
-
 def get_cart_keyboard(cart_items: list):
     """Клавиатура корзины"""
     builder = InlineKeyboardBuilder()
-    
-    # Кнопки для изменения количества
+
     for item in cart_items:
         builder.row(
             InlineKeyboardButton(
-                text=f"{item['name']} - {item['quantity']} шт | {item['total']}₽",
-                callback_data=f"cart_item_{item['id']}"
+                text=f"{item['name']} | {item['total']}₽",
+                callback_data="ignore"
             )
         )
         builder.row(
@@ -57,7 +48,7 @@ def get_cart_keyboard(cart_items: list):
             InlineKeyboardButton(text="➕", callback_data=f"cart_inc_{item['id']}"),
             InlineKeyboardButton(text="🗑", callback_data=f"cart_del_{item['id']}")
         )
-    
+
     builder.row(
         InlineKeyboardButton(text="✅ Оформить заказ", callback_data="checkout"),
         InlineKeyboardButton(text="🔄 Очистить всё", callback_data="cart_clear")
@@ -66,8 +57,13 @@ def get_cart_keyboard(cart_items: list):
         InlineKeyboardButton(text="🛍 Продолжить покупки", callback_data="categories"),
         InlineKeyboardButton(text="🔙 Главное меню", callback_data="main_menu")
     )
-    
+
     return builder.as_markup()
+
+
+empty_cart = InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="🛍 Перейти в каталог", callback_data="categories")]]
+)
 
 
 inline_admin_panel = InlineKeyboardMarkup(
@@ -184,7 +180,8 @@ async def cards_admin(category_id: int):
 
 async def back_to_categories(category_id: int, card_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='Купить', callback_data=f'buy_{card_id}')],
+        [InlineKeyboardButton(text='🛒 В корзину', callback_data=f'add_to_cart_{card_id}')],
+        [InlineKeyboardButton(text='Купить сейчас', callback_data=f'buy_{card_id}')],
         [InlineKeyboardButton(
             text='Назад', callback_data=f'category_{category_id}')]
     ])

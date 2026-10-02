@@ -10,12 +10,14 @@ from app.database.requests import (
 )
 import app.keyboards as kb
 import app.database.requests_cart as rqc
-from app.validation import validation_phone
+from app.validation import clean_name, clean_text, normalize_phone, ADDRESS_MIN_LENGTH, ADDRESS_MAX_LENGTH
 from app.timezone import now_msk
 
 
 import asyncio
 import logging
+import math
+import time
 from contextlib import suppress
 import os
 from dotenv import load_dotenv
@@ -25,6 +27,7 @@ load_dotenv()
 
 import ssl
 import certifi
+from cachetools import TTLCache
 from geopy.geocoders import Nominatim
 
 
@@ -33,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 
 PICKUP_TEXT = "Самовывоз"
+ORDER_COOLDOWN_SECONDS = 60
+
+# user_id -> время последнего заказа; запись сама исчезает через ORDER_COOLDOWN_SECONDS
+recent_orders: TTLCache = TTLCache(maxsize=10_000, ttl=ORDER_COOLDOWN_SECONDS)
 
 
 ctx = ssl.create_default_context(cafile=certifi.where())
@@ -60,44 +67,53 @@ async def contact(message: Message):
     await message.answer(f"📞 Контакты\n\n{await get_shop_contacts()}")
 
 
-@client.message(StateFilter("req_name"))  # Рег имени и создания состояние номера
-async def qet_req_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.capitalize())
+@client.message(F.text, StateFilter("req_name"))  # Имя при регистрации
+async def get_req_name(message: Message, state: FSMContext):
+    name = clean_name(message.text)
+    if not name:
+        await message.answer("❌ Имя должно состоять из букв (можно пробел и дефис), от 2 до 25 символов. Введите снова:")
+        return
+    await state.update_data(name=name)
     await message.answer(
-        "📱 Введите ваш номер телефона без пробелов и скобок.\nПример: +79817793276",
+        "📱 Введите ваш номер телефона или поделитесь контактом.\nПример: +79817793276",
         reply_markup=await kb.clients_phone(),
     )
     await state.set_state("req_phone")
 
 
-@client.message(F.contact, StateFilter("req_phone"))  # Регистрация номера
-async def qet_req_phone_numbers(message: Message, state: FSMContext):
-    await state.update_data(phone_number=message.contact.phone_number)
+@client.message(StateFilter("req_name"))  # Стикер, фото и т.п. вместо имени
+async def get_req_name_invalid(message: Message):
+    await message.answer("❌ Отправьте имя текстом:")
+
+
+async def finish_registration(message: Message, state: FSMContext, phone_number: str):
     data = await state.get_data()
-    await update_user(message.from_user.id, data["name"], data["phone_number"])
+    await update_user(message.from_user.id, data["name"], phone_number)
     await message.answer(text="✅ Вы успешно зарегистрировались!", reply_markup=kb.menu)
     await state.clear()
 
 
-@client.message(
-    StateFilter("req_phone")
-)  # Регистрация номера без "поделиться контактом"
-async def qet_req_phone_number(message: Message, state: FSMContext):
-    await state.update_data(phone_number=message.text)
-    data = await state.get_data()
-    if await validation_phone(data["phone_number"]):  # Валидация номера телефона успех
-        await update_user(message.from_user.id, data["name"], data["phone_number"])
-        await message.answer(
-            text="✅ Вы успешно зарегистрировались!", reply_markup=kb.menu
-        )
-        await state.clear()
-    else:  # провал валидации, открываем заново регистрацию
-        await state.clear()
-        await message.answer(
-            text="❌ Некорректно введён номер телефона, пройдите регистрацию ещё раз.",
-            reply_markup=await kb.clients_name(message.from_user.first_name),
-        )
-        await state.set_state("req_name")
+@client.message(F.contact, StateFilter("req_phone"))  # Номер через «Поделиться контактом»
+async def get_req_phone_contact(message: Message, state: FSMContext):
+    if message.contact.user_id != message.from_user.id:
+        await message.answer("❌ Поделитесь своим контактом, а не чужим:")
+        return
+    phone = message.contact.phone_number
+    await finish_registration(message, state, normalize_phone(phone) or phone)
+
+
+@client.message(F.text, StateFilter("req_phone"))  # Номер вручную
+async def get_req_phone_text(message: Message, state: FSMContext):
+    phone = normalize_phone(message.text)
+    if not phone:
+        await message.answer("❌ Некорректный номер. Введите российский номер, например +79817793276:")
+        return
+    await finish_registration(message, state, phone)
+
+
+@client.message(StateFilter("req_phone"))
+async def get_req_phone_invalid(message: Message):
+    await message.answer("❌ Отправьте номер текстом или нажмите «📱 Поделиться контактом»:")
 
 
 def render_cart_text(cart_items: list, total: int) -> str:
@@ -129,13 +145,21 @@ async def refresh_cart_message(callback: CallbackQuery):
 @client.callback_query(F.data.startswith("add_to_cart_"))
 async def add_to_cart(callback: CallbackQuery):
     card_id = int(callback.data.split("_")[-1])
-    await rqc.add_to_cart(callback.from_user.id, card_id)
+    try:
+        await rqc.add_to_cart(callback.from_user.id, card_id)
+    except rqc.CartError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
     await callback.answer("✅ Добавлено в корзину")
 
 
 @client.callback_query(F.data.startswith("cart_inc_"))
 async def cart_increase(callback: CallbackQuery):
-    await rqc.change_quantity(callback.from_user.id, int(callback.data.split("_")[-1]), 1)
+    try:
+        await rqc.change_quantity(callback.from_user.id, int(callback.data.split("_")[-1]), 1)
+    except rqc.CartError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
     await callback.answer()
     await refresh_cart_message(callback)
 
@@ -215,12 +239,29 @@ async def card_info(callback: CallbackQuery):
     )
 
 
-async def send_order_to_admin_chat(bot, tg_user, delivery_info: str) -> bool:
-    """Отправляет содержимое корзины в чат GROUP_ID и очищает корзину.
-    Возвращает False, если корзина уже пуста (например, нажали кнопку из старого сообщения)"""
-    cart_items, total = await rqc.get_cart_details(tg_user.id)
+def order_cooldown_left(user_id: int) -> int:
+    """Сколько секунд осталось до следующего разрешённого заказа (0 — можно заказывать)"""
+    ordered_at = recent_orders.get(user_id)
+    if ordered_at is None:
+        return 0
+    return max(1, math.ceil(ORDER_COOLDOWN_SECONDS - (time.monotonic() - ordered_at)))
+
+
+async def send_order_to_admin_chat(bot, tg_user, delivery_info: str) -> str:
+    """Оформляет заказ из корзины и возвращает текст ответа покупателю.
+
+    Защита от двойного заказа в два слоя:
+    1. Паузу между заказами бронируем до первого await — второй клик в этом процессе сразу получит отказ.
+    2. Корзину забираем атомарно в БД (take_cart_items) — даже при гонке заказ не задвоится."""
+    seconds_left = order_cooldown_left(tg_user.id)
+    if seconds_left:
+        return f"⏳ Вы недавно оформили заказ. Следующий можно через {seconds_left} сек."
+    recent_orders[tg_user.id] = time.monotonic()
+
+    cart_items, total = await rqc.take_cart_items(tg_user.id)
     if not cart_items:
-        return False
+        recent_orders.pop(tg_user.id, None)
+        return "🛒 Корзина пуста, добавьте товары через каталог."
 
     user = await get_user(tg_user.id)
     items_text = "\n".join(
@@ -238,19 +279,39 @@ async def send_order_to_admin_chat(bot, tg_user, delivery_info: str) -> bool:
         f"📦 Состав заказа:\n{items_text}\n\n"
         f"💰 Итого: {total} ₽"
     )
-    await bot.send_message(int(os.getenv("GROUP_ID")), info)
-    await rqc.clear_cart(tg_user.id)
+    try:
+        await bot.send_message(int(os.getenv("GROUP_ID")), info)
+    except Exception:
+        # Заказ не дошёл до админов: возвращаем товары в корзину, чтобы покупатель мог повторить
+        logger.exception("Не удалось отправить заказ пользователя %s в чат заказов", tg_user.id)
+        await rqc.restore_cart_items(tg_user.id, cart_items)
+        recent_orders.pop(tg_user.id, None)
+        return "❌ Не удалось оформить заказ, попробуйте ещё раз чуть позже."
+
     logger.info("Заказ от пользователя %s на сумму %s ₽ (%s)", tg_user.id, total, delivery_info.split(",")[0])
-    return True
+    return "✅ Спасибо, ваш заказ принят! Скоро с вами свяжется менеджер."
 
 
 async def finish_order(message: Message, state: FSMContext, tg_user, delivery_info: str):
-    is_sent = await send_order_to_admin_chat(message.bot, tg_user, delivery_info)
-    if is_sent:
-        await message.answer("✅ Спасибо, ваш заказ принят! Скоро с вами свяжется менеджер.", reply_markup=kb.menu)
-    else:
-        await message.answer("🛒 Корзина пуста, добавьте товары через каталог.", reply_markup=kb.menu)
+    result_text = await send_order_to_admin_chat(message.bot, tg_user, delivery_info)
+    await message.answer(result_text, reply_markup=kb.menu)
     await state.clear()
+
+
+async def check_can_order(callback: CallbackQuery) -> bool:
+    """Ранняя проверка перед вопросами о доставке, чтобы не спрашивать адрес зря"""
+    seconds_left = order_cooldown_left(callback.from_user.id)
+    if seconds_left:
+        await callback.answer(
+            f"⏳ Вы недавно оформили заказ. Следующий можно через {seconds_left} сек.", show_alert=True
+        )
+        return False
+    cart_items, _ = await rqc.get_cart_details(callback.from_user.id)
+    if not cart_items:
+        await callback.answer("🛒 Корзина пуста", show_alert=True)
+        return False
+    await callback.answer()
+    return True
 
 
 async def ask_delivery_type(callback: CallbackQuery):
@@ -261,30 +322,31 @@ async def ask_delivery_type(callback: CallbackQuery):
 
 @client.callback_query(F.data.startswith("buy_"))  # «Купить сейчас» = в корзину + оформление
 async def client_buy_callback(callback: CallbackQuery):
-    await callback.answer()
-    await rqc.add_to_cart(callback.from_user.id, int(callback.data.split("_")[1]))
-    await ask_delivery_type(callback)
+    try:
+        await rqc.add_to_cart(callback.from_user.id, int(callback.data.split("_")[1]))
+    except rqc.CartError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
+    if await check_can_order(callback):
+        await ask_delivery_type(callback)
 
 
 @client.callback_query(F.data == "checkout")
 async def checkout(callback: CallbackQuery):
-    cart_items, _ = await rqc.get_cart_details(callback.from_user.id)
-    if not cart_items:
-        await callback.answer("🛒 Корзина пуста", show_alert=True)
-        return
-    await callback.answer()
-    await ask_delivery_type(callback)
+    if await check_can_order(callback):
+        await ask_delivery_type(callback)
 
 
 @client.callback_query(F.data == "order_pickup")
 async def order_pickup(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await finish_order(callback.message, state, callback.from_user, PICKUP_TEXT)
+    if await check_can_order(callback):
+        await finish_order(callback.message, state, callback.from_user, PICKUP_TEXT)
 
 
 @client.callback_query(F.data == "order_delivery")
 async def order_delivery(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
+    if not await check_can_order(callback):
+        return
     await state.set_state("waiting_for_address")
     await callback.message.answer(
         "📍 Отправьте ваш адрес доставки.\nПример: г. Санкт-Петербург, ул. Колотушкина д.12, к/лит, кв. 1",
@@ -296,18 +358,33 @@ async def order_delivery(callback: CallbackQuery, state: FSMContext):
     F.location, StateFilter("waiting_for_address")
 )  # Получение адреса по геолокации и обработка заказа
 async def getting_location(message: Message, state: FSMContext):
-    # geopy синхронный, поэтому выносим запрос в поток, чтобы не блокировать бота
-    address = await asyncio.to_thread(
-        geolocator.reverse,
-        f"{message.location.latitude}, {message.location.longitude}",
-        exactly_one=True,
-        language="ru",
-    )
-    await finish_order(message, state, message.from_user, f"Доставка, адрес: {address}")
+    coordinates = f"{message.location.latitude}, {message.location.longitude}"
+    try:
+        # geopy синхронный, поэтому выносим запрос в поток, чтобы не блокировать бота
+        address = await asyncio.to_thread(
+            geolocator.reverse, coordinates, exactly_one=True, language="ru", timeout=10
+        )
+    except Exception:
+        # Сервис геокодинга недоступен или ограничил запросы: заказ не теряем, отдаём координаты
+        logger.warning("Не удалось определить адрес по координатам %s", coordinates, exc_info=True)
+        address = None
+    address_text = str(address) if address else f"координаты {coordinates}"
+    await finish_order(message, state, message.from_user, f"Доставка, адрес: {address_text}")
 
 
 @client.message(
     F.text, StateFilter("waiting_for_address")
 )  # Получение адреса вручную и обработка заказа
 async def getting_address_manually(message: Message, state: FSMContext):
-    await finish_order(message, state, message.from_user, f"Доставка, адрес: {message.text}")
+    address = clean_text(message.text, ADDRESS_MAX_LENGTH, ADDRESS_MIN_LENGTH)
+    if not address:
+        await message.answer(
+            f"❌ Адрес должен быть от {ADDRESS_MIN_LENGTH} до {ADDRESS_MAX_LENGTH} символов. Введите снова:"
+        )
+        return
+    await finish_order(message, state, message.from_user, f"Доставка, адрес: {address}")
+
+
+@client.message(StateFilter("waiting_for_address"))  # Стикер, фото и т.п. вместо адреса
+async def getting_address_invalid(message: Message):
+    await message.answer("📍 Отправьте адрес текстом или нажмите «📍 Отправить геопозицию»:")

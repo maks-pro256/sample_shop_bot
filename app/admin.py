@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 
 
@@ -11,6 +11,10 @@ import app.keyboards as kb
 from app.filters import IsAdmin
 import app.database.requests_admin as rq
 from app.database.requests import get_shop_description, get_shop_contacts
+from app.validation import (
+    clean_text, parse_price, CATEGORY_NAME_MAX_LENGTH, CARD_NAME_MAX_LENGTH,
+    CARD_DESCRIPTION_MAX_LENGTH, MAX_PRICE
+)
 import logging
 
 
@@ -42,12 +46,12 @@ async def add_category_name(callbback: CallbackQuery, state: FSMContext):
     await state.set_state(kb.AddCategory.waiting_for_title)
 
 
-@admin.message(kb.AddCategory.waiting_for_title)  
+@admin.message(kb.AddCategory.waiting_for_title, F.text)
 async def add_category_base(message: Message, state: FSMContext):
-    title = message.text.strip() 
+    title = clean_text(message.text, CATEGORY_NAME_MAX_LENGTH)
     try:
         if not title:
-            await message.answer("❌ Название не может быть пустым. Введите снова:")
+            await message.answer(f"❌ Название должно быть от 1 до {CATEGORY_NAME_MAX_LENGTH} символов. Введите снова:")
             return 
         await state.update_data(title=title)
         await rq.add_category_database(title)
@@ -80,27 +84,37 @@ async def add_card_name(callback: CallbackQuery, state: FSMContext):
     await state.set_state(kb.AddCard.name)
 
 
-@admin.message(kb.AddCard.name)
+@admin.message(kb.AddCard.name, F.text)
 async def add_card_price(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
+    name = clean_text(message.text, CARD_NAME_MAX_LENGTH)
+    if not name:
+        await message.answer(f"❌ Название должно быть от 1 до {CARD_NAME_MAX_LENGTH} символов. Введите снова:")
+        return
+    await state.update_data(name=name)
     await message.answer("💰 Введите цену товара (целым числом):")
     await state.set_state(kb.AddCard.price)
 
 
-@admin.message(kb.AddCard.price)
+@admin.message(kb.AddCard.price, F.text)
 async def add_card_description(message: Message, state: FSMContext):
-    price = (message.text or "").strip()
-    if not price.isdigit():
-        await message.answer("❌ Цена должна быть целым числом. Введите снова:")
+    price = parse_price(message.text)
+    if price is None:
+        await message.answer(f"❌ Цена должна быть целым числом от 1 до {MAX_PRICE}. Введите снова:")
         return
-    await state.update_data(price=int(price))
+    await state.update_data(price=price)
     await message.answer("📝 Напишите описание товара:")
     await state.set_state(kb.AddCard.description)
 
 
-@admin.message(kb.AddCard.description)
+@admin.message(kb.AddCard.description, F.text)
 async def add_card_photo(message: Message, state: FSMContext):
-    await state.update_data(description=message.text.strip())
+    description = clean_text(message.text, CARD_DESCRIPTION_MAX_LENGTH)
+    if not description:
+        await message.answer(
+            f"❌ Описание должно быть от 1 до {CARD_DESCRIPTION_MAX_LENGTH} символов. Введите снова:"
+        )
+        return
+    await state.update_data(description=description)
     await message.answer("🖼 Отправьте фото товара:")
     await state.set_state(kb.AddCard.photo)
 
@@ -231,3 +245,16 @@ async def edit_shop_contacts_save(message: Message, state: FSMContext):
     await rq.set_shop_contacts(new_contacts)
     await message.answer("✅ Контакты обновлены!")
     await state.clear()
+
+
+# Регистрируется последним: ловит стикеры, фото и т.п. там, где админка ждёт текст
+@admin.message(StateFilter(
+    kb.AddCategory.waiting_for_title,
+    kb.AddCard.name,
+    kb.AddCard.price,
+    kb.AddCard.description,
+    kb.EditShopDescription.waiting_for_text,
+    kb.EditShopContacts.waiting_for_text,
+))
+async def text_expected(message: Message):
+    await message.answer("❌ Здесь нужен текст. Отправьте его ещё раз:")

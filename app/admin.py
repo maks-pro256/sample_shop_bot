@@ -8,12 +8,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 
 import app.keyboards as kb
+from app.filters import IsAdmin
 import app.database.requests_admin as rq
 from app.database.requests import get_shop_description
 import logging
 
 
 admin = Router()
+admin.message.filter(IsAdmin())
+admin.callback_query.filter(IsAdmin())
 
 
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @admin.message(Command("admin"))
 async def admin_panel(message: Message):
-    await message.answer(text="Приветсвую, будущий админ!", 
+    await message.answer(text="Админ-панель магазина:",
                          reply_markup=kb.inline_admin_panel)
 
 

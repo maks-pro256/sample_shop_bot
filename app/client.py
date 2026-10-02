@@ -1,12 +1,12 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart, StateFilter
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
 
 from app.database.requests import (
-    set_user, update_user, get_card, get_user, get_shop_description, get_shop_contacts
+    set_user, update_user, get_card, get_card_photos, get_user, get_shop_description, get_shop_contacts
 )
 import app.keyboards as kb
 import app.database.requests_cart as rqc
@@ -212,31 +212,59 @@ async def catalog(event: Message | CallbackQuery):
         )
 
 
-@client.callback_query(F.data.startswith("category_"))
+@client.callback_query(F.data.startswith("category_"))  # category_{id} или category_{id}_{страница}
 async def cards(callback: CallbackQuery):
     await callback.answer()
-    category_id = int(callback.data.split("_")[1])
-    keyboard = await kb.cards(category_id)
+    parts = callback.data.split("_")
+    category_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
+    keyboard = await kb.cards(category_id, page)
     if callback.message.photo:  # из карточки товара: фото нельзя превратить в текст
         await callback.message.delete()
         await callback.message.answer("📦 Выберите товар", reply_markup=keyboard)
     else:
-        await callback.message.edit_text("📦 Выберите товар", reply_markup=keyboard)
+        with suppress(TelegramBadRequest):  # повторное нажатие на ту же страницу
+            await callback.message.edit_text("📦 Выберите товар", reply_markup=keyboard)
 
 
-@client.callback_query(F.data.startswith("card_"))
+def card_caption(card) -> str:
+    return f"📦 {card.name}\n\n{card.description}\n\n💰 Цена: {card.price} ₽"
+
+
+@client.callback_query(F.data.startswith("card_"))  # card_{id}_{страница каталога}
 async def card_info(callback: CallbackQuery):
     await callback.answer()
-    card_id = int(callback.data.split("_")[1])
+    parts = callback.data.split("_")
+    card_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 0
     card = await get_card(card_id)
     if not card:
         await callback.message.answer("😔 Этот товар больше не продаётся.")
         return
+    photos = await get_card_photos(card_id)
     await callback.message.answer_photo(
-        photo=card.image,
-        caption=f"📦 {card.name}\n\n{card.description}\n\n💰 Цена: {card.price} ₽",
-        reply_markup=await kb.back_to_categories(card.category_id, card_id),
+        photo=photos[0],
+        caption=card_caption(card),
+        reply_markup=kb.card_keyboard(card.category_id, card_id, page, 0, len(photos)),
     )
+
+
+@client.callback_query(F.data.startswith("photo_"))  # photo_{card_id}_{страница}_{номер фото}
+async def card_photo_switch(callback: CallbackQuery):
+    _, card_id, page, photo_index = callback.data.split("_")
+    card_id, page, photo_index = int(card_id), int(page), int(photo_index)
+    card = await get_card(card_id)
+    photos = await get_card_photos(card_id)
+    if not card or not photos:
+        await callback.answer("😔 Этот товар больше не продаётся", show_alert=True)
+        return
+    photo_index %= len(photos)  # фото могли удалить, пока покупатель листал
+    await callback.answer()
+    with suppress(TelegramBadRequest):  # то же фото: «message is not modified»
+        await callback.message.edit_media(
+            InputMediaPhoto(media=photos[photo_index], caption=card_caption(card)),
+            reply_markup=kb.card_keyboard(card.category_id, card_id, page, photo_index, len(photos)),
+        )
 
 
 def order_cooldown_left(user_id: int) -> int:

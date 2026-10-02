@@ -1,4 +1,4 @@
-from app.database.models import async_session, Category, Card, User, ShopSetting
+from app.database.models import async_session, Category, Card, CardPhoto, User, ShopSetting
 from app.database.requests import SHOP_DESCRIPTION_KEY, SHOP_CONTACTS_KEY
 from sqlalchemy import select, insert, delete, func
 from sqlalchemy.exc import SQLAlchemyError,IntegrityError
@@ -36,21 +36,30 @@ async def add_category_database(title: str):
             raise  # Пробрасываем исключение дальше
 
 
+EDITABLE_CARD_FIELDS = {"name", "price", "description"}
+
+
+def _add_extra_photos(session, card_id: int, photos: list[str]):
+    for position, file_id in enumerate(photos[1:], start=1):
+        session.add(CardPhoto(card_id=card_id, file_id=file_id, position=position))
+
+
 async def add_card_database(category_id: int, name: str, price: int,
-                           description: str, photo: str):
+                            description: str, photos: list[str]) -> bool:
+    """Создаёт товар: первое фото становится обложкой, остальные идут в card_photos"""
     try:
         async with async_session() as session:
             async with session.begin():  # автоматический commit при успехе
-                await session.execute(
-                    insert(Card).values(
-                        category_id=category_id,
-                        name=name, 
-                        price=price, 
-                        description=description, 
-                        image=photo
-                    )
+                card = Card(
+                    category_id=category_id,
+                    name=name,
+                    price=price,
+                    description=description,
+                    image=photos[0],
                 )
-            # session.begin() автоматически делает commit
+                session.add(card)
+                await session.flush()  # нужен card.id для фото
+                _add_extra_photos(session, card.id, photos)
             logger.info(f"Карточка '{name}' успешно добавлена в БД")
             return True
     except SQLAlchemyError as e:
@@ -58,11 +67,39 @@ async def add_card_database(category_id: int, name: str, price: int,
         return False
 
 
+async def update_card_field(card_id: int, field: str, value: str | int) -> bool:
+    """Меняет одно поле товара. False, если товар уже удалён"""
+    if field not in EDITABLE_CARD_FIELDS:
+        raise ValueError(f"Поле {field} нельзя редактировать")
+    async with async_session() as session:
+        card = await session.get(Card, card_id)
+        if not card:
+            return False
+        setattr(card, field, value)
+        await session.commit()
+        return True
+
+
+async def replace_card_photos(card_id: int, photos: list[str]) -> bool:
+    """Полностью заменяет фото товара. False, если товар уже удалён"""
+    async with async_session() as session:
+        card = await session.get(Card, card_id)
+        if not card:
+            return False
+        card.image = photos[0]
+        await session.execute(delete(CardPhoto).where(CardPhoto.card_id == card_id))
+        _add_extra_photos(session, card_id, photos)
+        await session.commit()
+        return True
+
+
 async def del_card_database(card_id: int):
     async with async_session() as session:
         card = await session.get(Card, card_id)
 
         if card:
+            # Фото удаляем явно: SQLite без PRAGMA foreign_keys не выполняет ON DELETE CASCADE
+            await session.execute(delete(CardPhoto).where(CardPhoto.card_id == card_id))
             await session.delete(card)
             await session.commit()
 
@@ -70,7 +107,11 @@ async def del_card_database(card_id: int):
 async def delete_category_database(category_id: int):
     """Полностью удаляет категорию и все связанные с ней карточки"""
     async with async_session() as session:
-        # Карточки удаляем явно: SQLite без PRAGMA foreign_keys не выполняет ON DELETE CASCADE
+        # Каскад удаляем явно: SQLite без PRAGMA foreign_keys не выполняет ON DELETE CASCADE
+        category_card_ids = select(Card.id).where(Card.category_id == category_id)
+        await session.execute(
+            delete(CardPhoto).where(CardPhoto.card_id.in_(category_card_ids))
+        )
         await session.execute(
             delete(Card).where(Card.category_id == category_id)
         )

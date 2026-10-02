@@ -1,5 +1,7 @@
-from app.database.models import async_session, Category, Card, User, ShopSetting
-from sqlalchemy import select, update
+import math
+
+from app.database.models import async_session, Category, Card, CardPhoto, User, ShopSetting
+from sqlalchemy import select, update, func
 
 
 SHOP_DESCRIPTION_KEY = "description"
@@ -50,9 +52,35 @@ async def get_categories():
         return await session.scalars(select(Category))
 
 
-async def get_cards_by_category(category_id: int):
+async def get_cards_page(category_id: int, page: int, page_size: int) -> tuple[list[Card], int, int]:
+    """Товары категории постранично: (товары, всего страниц, фактическая страница).
+    Номер страницы поджимается в допустимые границы — например, если товары удалили"""
     async with async_session() as session:
-        return await session.scalars(select(Card).where(Card.category_id == category_id))
+        cards_count = await session.scalar(
+            select(func.count()).select_from(Card).where(Card.category_id == category_id)
+        )
+        pages_count = max(1, math.ceil(cards_count / page_size))
+        page = min(max(page, 0), pages_count - 1)
+        cards = await session.scalars(
+            select(Card)
+            .where(Card.category_id == category_id)
+            .order_by(Card.id)
+            .offset(page * page_size)
+            .limit(page_size)
+        )
+        return list(cards), pages_count, page
+
+
+async def get_card_photos(card_id: int) -> list[str]:
+    """Все фото товара по порядку: обложка + дополнительные"""
+    async with async_session() as session:
+        card = await session.get(Card, card_id)
+        if not card:
+            return []
+        extra_photos = await session.scalars(
+            select(CardPhoto.file_id).where(CardPhoto.card_id == card_id).order_by(CardPhoto.position)
+        )
+        return [card.image, *extra_photos]
 
 
 async def get_card(card_id: int):

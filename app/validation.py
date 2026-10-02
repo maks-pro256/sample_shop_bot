@@ -9,6 +9,7 @@ CARD_DESCRIPTION_MAX_LENGTH = 256
 ADDRESS_MIN_LENGTH = 5
 ADDRESS_MAX_LENGTH = 300
 MAX_PRICE = 10_000_000
+MAX_CARD_PHOTOS = 10  # столько же Telegram допускает в одном альбоме
 
 RUSSIAN_PHONE = re.compile(r"^(?:\+7|7|8)(\d{10})$")
 

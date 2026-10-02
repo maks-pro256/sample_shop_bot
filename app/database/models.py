@@ -48,8 +48,19 @@ class Card(Base):
     name: Mapped[str] = mapped_column(String(50))
     description: Mapped[str] = mapped_column(String(256))
     price: Mapped[int]
-    image: Mapped[str] = mapped_column(String(256))
+    image: Mapped[str] = mapped_column(String(256))  # обложка, первое фото товара
     category_id: Mapped[int] = mapped_column(ForeignKey('categories.id', ondelete='CASCADE'))
+
+
+class CardPhoto(Base):
+    """Дополнительные фото товара (обложка хранится в Card.image).
+    Отдельная таблица, а не новая колонка: create_all создаст её и в уже существующей БД"""
+    __tablename__ = 'card_photos'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey('cards.id', ondelete='CASCADE'), index=True)
+    file_id: Mapped[str] = mapped_column(String(256))
+    position: Mapped[int]
 
 
 class Cart(Base):

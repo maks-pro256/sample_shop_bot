@@ -14,3 +14,5 @@ __pycache__
 Dockerfile
 docker-compose.yml
 startbot.sh
+backups
+scripts

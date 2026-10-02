@@ -3,7 +3,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.state import State, StatesGroup
 
 
-from app.database.requests import get_categories, get_cards_by_category
+from app.database.requests import get_categories, get_cards_page
+
+
+CARDS_PAGE_SIZE = 8
 
 
 class AddCategory(StatesGroup):
@@ -24,6 +27,11 @@ class AddCard(StatesGroup):
     price = State()
     description = State()
     photo = State()
+
+
+class EditCard(StatesGroup):
+    value = State()   # новое название, цена или описание
+    photos = State()  # новый набор фото
 
 
 # Тексты кнопок главного меню: хендлеры в client.py ловят сообщения по этим же константам
@@ -79,6 +87,7 @@ empty_cart = InlineKeyboardMarkup(
 inline_admin_panel = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить", callback_data='add_product')],
+        [InlineKeyboardButton(text="✏️ Изменить товар", callback_data="edit_card")],
         [InlineKeyboardButton(text="🗑 Удалить", callback_data="remove_product")],
         [InlineKeyboardButton(text="📝 Изменить описание магазина", callback_data="edit_shop_description")],
         [InlineKeyboardButton(text="📞 Изменить контакты", callback_data="edit_shop_contacts")]]
@@ -131,69 +140,98 @@ async def clients_location():
                                 input_field_placeholder='Введите адрес или отправьте геолокацию')
 
 
+async def categories_with_prefix(prefix: str):
+    """Список категорий, у каждой кнопки callback_data = f"{prefix}_{id}" """
+    keyboard = InlineKeyboardBuilder()
+    for category in await get_categories():
+        keyboard.add(InlineKeyboardButton(text=category.name,
+                                          callback_data=f'{prefix}_{category.id}'))
+    return keyboard.adjust(2).as_markup()
+
+
 async def categories():
-    Keyboard = InlineKeyboardBuilder()
-    all_categories = await get_categories()
-    for category in all_categories:
-        Keyboard.add(InlineKeyboardButton(text=category.name,
-                                          callback_data=f'category_{category.id}'))
-    return Keyboard.adjust(2).as_markup()
+    return await categories_with_prefix('category')
 
 
 async def categories_admin():
-    Keyboard = InlineKeyboardBuilder()
-    all_categories = await get_categories()
-    for category in all_categories:
-        Keyboard.add(InlineKeyboardButton(text=category.name,
-                                          callback_data=f'categoryes_{category.id}'))
-    return Keyboard.adjust(2).as_markup()
+    return await categories_with_prefix('categoryes')
 
 
 async def categories_admin_del():
-    Keyboard = InlineKeyboardBuilder()
-    all_categories = await get_categories()
-    for category in all_categories:
-        Keyboard.add(InlineKeyboardButton(text=category.name,
-                                          callback_data=f'cat_{category.id}'))
-    return Keyboard.adjust(2).as_markup()
+    return await categories_with_prefix('cat')
 
 
 async def categories_admin_2del():
-    Keyboard = InlineKeyboardBuilder()
-    all_categories = await get_categories()
-    for category in all_categories:
-        Keyboard.add(InlineKeyboardButton(text=category.name,
-                                          callback_data=f'cate_{category.id}'))
-    return Keyboard.adjust(2).as_markup()
+    return await categories_with_prefix('cate')
 
 
-async def cards(category_id: int):
+async def categories_admin_edit():
+    return await categories_with_prefix('ecat')
+
+
+async def cards_page_keyboard(category_id: int, page: int, item_prefix: str,
+                              page_prefix: str, back_callback: str):
+    """Товары категории постранично.
+    Кнопка товара: f"{item_prefix}_{card_id}_{page}" (страница нужна, чтобы «Назад» вернул на неё же).
+    Листание: f"{page_prefix}_{category_id}_{page}"."""
+    cards_on_page, pages_count, page = await get_cards_page(category_id, page, CARDS_PAGE_SIZE)
     keyboard = InlineKeyboardBuilder()
-    all_cards = await get_cards_by_category(category_id)
-    for card in all_cards:
+    for card in cards_on_page:
         keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price} ₽',
-                                          callback_data=f'card_{card.id}'))
-    keyboard.row(InlineKeyboardButton(
-        text='🔙 Назад', callback_data='categories'))
+                                          callback_data=f'{item_prefix}_{card.id}_{page}'))
+    if pages_count > 1:
+        navigation = []
+        if page > 0:
+            navigation.append(InlineKeyboardButton(
+                text='◀️', callback_data=f'{page_prefix}_{category_id}_{page - 1}'))
+        navigation.append(InlineKeyboardButton(text=f'{page + 1}/{pages_count}', callback_data='ignore'))
+        if page < pages_count - 1:
+            navigation.append(InlineKeyboardButton(
+                text='▶️', callback_data=f'{page_prefix}_{category_id}_{page + 1}'))
+        keyboard.row(*navigation)
+    keyboard.row(InlineKeyboardButton(text='🔙 Назад', callback_data=back_callback))
     return keyboard.as_markup()
 
 
-async def cards_admin(category_id: int):
+async def cards(category_id: int, page: int = 0):
+    return await cards_page_keyboard(category_id, page, 'card', 'category', 'categories')
+
+
+async def cards_admin(category_id: int, page: int = 0):
+    return await cards_page_keyboard(category_id, page, 'carda', 'cat', 'remove_product')
+
+
+async def cards_admin_edit(category_id: int, page: int = 0):
+    return await cards_page_keyboard(category_id, page, 'ecard', 'ecat', 'edit_card')
+
+
+def card_keyboard(category_id: int, card_id: int, page: int, photo_index: int, photos_count: int):
+    """Карточка товара: листание фото (если их несколько), покупка и возврат на ту же страницу каталога"""
     keyboard = InlineKeyboardBuilder()
-    all_cards = await get_cards_by_category(category_id)
-    for card in all_cards:
-        keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price} ₽',
-                                          callback_data=f'carda_{card.id}'))
-    keyboard.row(InlineKeyboardButton(
-        text='🔙 Назад', callback_data='categories'))
+    if photos_count > 1:
+        previous_index = (photo_index - 1) % photos_count
+        next_index = (photo_index + 1) % photos_count
+        keyboard.row(
+            InlineKeyboardButton(text='◀️', callback_data=f'photo_{card_id}_{page}_{previous_index}'),
+            InlineKeyboardButton(text=f'🖼 {photo_index + 1}/{photos_count}', callback_data='ignore'),
+            InlineKeyboardButton(text='▶️', callback_data=f'photo_{card_id}_{page}_{next_index}'),
+        )
+    keyboard.row(InlineKeyboardButton(text='🛒 В корзину', callback_data=f'add_to_cart_{card_id}'))
+    keyboard.row(InlineKeyboardButton(text='⚡ Купить сейчас', callback_data=f'buy_{card_id}'))
+    keyboard.row(InlineKeyboardButton(text='🔙 Назад', callback_data=f'category_{category_id}_{page}'))
     return keyboard.as_markup()
 
 
-async def back_to_categories(category_id: int, card_id: int):
+photos_done = InlineKeyboardMarkup(
+    inline_keyboard=[[InlineKeyboardButton(text="✅ Готово", callback_data="photos_done")]]
+)
+
+
+def card_edit_menu(card_id: int, category_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text='🛒 В корзину', callback_data=f'add_to_cart_{card_id}')],
-        [InlineKeyboardButton(text='⚡ Купить сейчас', callback_data=f'buy_{card_id}')],
-        [InlineKeyboardButton(
-            text='🔙 Назад', callback_data=f'category_{category_id}')]
+        [InlineKeyboardButton(text="✏️ Название", callback_data=f"efield_name_{card_id}"),
+         InlineKeyboardButton(text="💰 Цена", callback_data=f"efield_price_{card_id}")],
+        [InlineKeyboardButton(text="📝 Описание", callback_data=f"efield_description_{card_id}"),
+         InlineKeyboardButton(text="🖼 Фото", callback_data=f"efield_photos_{card_id}")],
+        [InlineKeyboardButton(text="🔙 К списку товаров", callback_data=f"ecat_{category_id}")],
     ])
-

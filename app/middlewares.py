@@ -20,6 +20,8 @@ class ThrottlingMiddleware(BaseMiddleware):
         self._buckets: TTLCache = TTLCache(maxsize=10_000, ttl=60)
         # Кому уже показали предупреждение: не чаще раза в warning_interval, иначе бот сам заспамит в ответ
         self._warned: TTLCache = TTLCache(maxsize=10_000, ttl=warning_interval)
+        # Альбомы, за которые уже списан жетон: альбом из 10 фото — одно действие, а не десять
+        self._seen_albums: TTLCache = TTLCache(maxsize=10_000, ttl=10)
 
     def _take_token(self, user_id: int) -> bool:
         now = time.monotonic()
@@ -36,7 +38,15 @@ class ThrottlingMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         user = event.from_user
-        if user is None or self._take_token(user.id):
+        if user is None:
+            return await handler(event, data)
+
+        album_id = event.media_group_id if isinstance(event, Message) else None
+        if album_id and album_id in self._seen_albums:
+            return await handler(event, data)
+        if self._take_token(user.id):
+            if album_id:
+                self._seen_albums[album_id] = True
             return await handler(event, data)
 
         if user.id not in self._warned:

@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import SimpleEventIsolation
 
 
 from app.client import client
@@ -33,7 +34,9 @@ logger = logging.getLogger("shop_bot")
 async def main():
     bot = Bot(token=os.getenv("TG_TOKEN"))
 
-    dp = Dispatcher()
+    # События одного пользователя обрабатываются строго по очереди:
+    # иначе фото из альбома, пришедшие одновременно, затирают друг друга в FSM
+    dp = Dispatcher(events_isolation=SimpleEventIsolation())
     throttling = ThrottlingMiddleware()
     dp.message.outer_middleware(throttling)
     dp.callback_query.outer_middleware(throttling)

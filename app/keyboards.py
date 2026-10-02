@@ -38,12 +38,13 @@ class EditCard(StatesGroup):
 BTN_CATALOG = "🛍 Каталог"
 BTN_CONTACTS = "📞 Контакты"
 BTN_CART = "🛒 Корзина"
+BTN_ORDERS = "📦 Мои заказы"
 
 
 menu = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text=BTN_CATALOG)],
-    [KeyboardButton(text=BTN_CONTACTS)],
-    [KeyboardButton(text=BTN_CART)]
+    [KeyboardButton(text=BTN_CART), KeyboardButton(text=BTN_ORDERS)],
+    [KeyboardButton(text=BTN_CONTACTS)]
 ],
     resize_keyboard=True,
     input_field_placeholder='Выберите пункт меню...')

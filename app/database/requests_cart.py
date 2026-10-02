@@ -30,13 +30,13 @@ async def _get_cart_for_update(session: AsyncSession, user_id: int) -> Cart:
     return await session.scalar(query)
 
 
-async def _save_items(session: AsyncSession, cart: Cart, items: dict):
+async def save_cart_items(session: AsyncSession, cart: Cart, items: dict):
     # Присваиваем новый dict: изменения внутри старого SQLAlchemy не замечает и не сохраняет
     cart.items = items
     await session.commit()
 
 
-async def _build_cart_details(session: AsyncSession, items: dict) -> tuple[list[dict], int]:
+async def build_cart_details(session: AsyncSession, items: dict) -> tuple[list[dict], int]:
     """Позиции корзины с названиями и ценами. Удалённые админом товары пропускаются"""
     cart_details = []
     total = 0
@@ -67,7 +67,7 @@ async def add_to_cart(user_id: int, card_id: int):
         if items.get(key, 0) >= MAX_ITEM_QUANTITY:
             raise CartError(f"⚠️ Не больше {MAX_ITEM_QUANTITY} шт. одного товара")
         items[key] = items.get(key, 0) + 1
-        await _save_items(session, cart, items)
+        await save_cart_items(session, cart, items)
 
 
 async def change_quantity(user_id: int, card_id: int, delta: int):
@@ -83,7 +83,7 @@ async def change_quantity(user_id: int, card_id: int, delta: int):
             items[key] = new_quantity
         else:
             items.pop(key, None)
-        await _save_items(session, cart, items)
+        await save_cart_items(session, cart, items)
 
 
 async def remove_from_cart(user_id: int, card_id: int):
@@ -91,13 +91,13 @@ async def remove_from_cart(user_id: int, card_id: int):
         cart = await _get_cart_for_update(session, user_id)
         items = dict(cart.items or {})
         items.pop(str(card_id), None)
-        await _save_items(session, cart, items)
+        await save_cart_items(session, cart, items)
 
 
 async def clear_cart(user_id: int):
     async with async_session() as session:
         cart = await _get_cart_for_update(session, user_id)
-        await _save_items(session, cart, {})
+        await save_cart_items(session, cart, {})
 
 
 async def get_cart_details(user_id: int) -> tuple[list[dict], int]:
@@ -105,21 +105,7 @@ async def get_cart_details(user_id: int) -> tuple[list[dict], int]:
         cart = await session.scalar(select(Cart).where(Cart.user_id == user_id))
         if not cart or not cart.items:
             return [], 0
-        return await _build_cart_details(session, cart.items)
-
-
-async def take_cart_items(user_id: int) -> tuple[list[dict], int]:
-    """Атомарно забирает содержимое корзины для заказа: читает и очищает в одной транзакции.
-    Второй параллельный вызов дождётся первого и получит пустую корзину, поэтому заказ не задвоится"""
-    async with async_session() as session:
-        cart = await session.scalar(
-            select(Cart).where(Cart.user_id == user_id).with_for_update()
-        )
-        if not cart or not cart.items:
-            return [], 0
-        cart_details, total = await _build_cart_details(session, cart.items)
-        await _save_items(session, cart, {})
-        return cart_details, total
+        return await build_cart_details(session, cart.items)
 
 
 async def restore_cart_items(user_id: int, cart_details: list[dict]):
@@ -130,4 +116,4 @@ async def restore_cart_items(user_id: int, cart_details: list[dict]):
         for item in cart_details:
             key = str(item['id'])
             items[key] = min(MAX_ITEM_QUANTITY, items.get(key, 0) + item['quantity'])
-        await _save_items(session, cart, items)
+        await save_cart_items(session, cart, items)

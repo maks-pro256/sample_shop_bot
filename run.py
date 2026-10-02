@@ -8,6 +8,7 @@ from aiogram.fsm.storage.memory import SimpleEventIsolation
 
 from app.client import client
 from app.admin import admin
+from app.manager import manager
 from app.database.models import init_models
 from app.middlewares import ThrottlingMiddleware
 from app.timezone import MSK
@@ -42,6 +43,7 @@ async def main():
     dp.callback_query.outer_middleware(throttling)
     dp.include_router(client)
     dp.include_router(admin)
+    dp.include_router(manager)
     dp.startup.register(startup)
     dp.shutdown.register(shutdown)
     await dp.start_polling(bot)

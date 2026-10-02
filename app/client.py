@@ -10,8 +10,12 @@ from app.database.requests import (
 )
 import app.keyboards as kb
 import app.database.requests_cart as rqc
+import app.database.requests_orders as rqo
+from app.orders import (
+    OrderStatus, customer_order_keyboard, customer_order_text, customer_orders_list,
+    customer_cancel_confirm_keyboard, manager_order_keyboard, manager_order_text,
+)
 from app.validation import clean_name, clean_text, normalize_phone, ADDRESS_MIN_LENGTH, ADDRESS_MAX_LENGTH
-from app.timezone import now_msk
 
 
 import asyncio
@@ -35,7 +39,6 @@ client = Router()
 logger = logging.getLogger(__name__)
 
 
-PICKUP_TEXT = "Самовывоз"
 ORDER_COOLDOWN_SECONDS = 60
 
 # user_id -> время последнего заказа; запись сама исчезает через ORDER_COOLDOWN_SECONDS
@@ -133,6 +136,88 @@ async def show_cart(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
 async def get_cart_user(message: Message):
     text, keyboard = await show_cart(message.from_user.id)
     await message.answer(text, reply_markup=keyboard)
+
+
+@client.message(F.text == kb.BTN_ORDERS)
+async def my_orders(message: Message):
+    text, keyboard = customer_orders_list(await rqo.get_user_orders(message.from_user.id))
+    await message.answer(text, reply_markup=keyboard)
+
+
+@client.callback_query(F.data == "myorders")
+async def my_orders_back(callback: CallbackQuery):
+    await callback.answer()
+    text, keyboard = customer_orders_list(await rqo.get_user_orders(callback.from_user.id))
+    with suppress(TelegramBadRequest):
+        await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+async def get_own_order(callback: CallbackQuery, order_id: int):
+    """Заказ покупателя или None. callback_data можно подделать, поэтому владельца проверяем всегда"""
+    order = await rqo.get_order(order_id)
+    if order is None or order.user_id != callback.from_user.id:
+        await callback.answer("Заказ не найден", show_alert=True)
+        return None
+    return order
+
+
+@client.callback_query(F.data.startswith("myorder_"))
+async def my_order_details(callback: CallbackQuery):
+    order = await get_own_order(callback, int(callback.data.split("_")[1]))
+    if order is None:
+        return
+    await callback.answer()
+    with suppress(TelegramBadRequest):
+        await callback.message.edit_text(customer_order_text(order), reply_markup=customer_order_keyboard(order))
+
+
+@client.callback_query(F.data.startswith("ucancel_"))  # первый шаг отмены: просим подтвердить
+async def customer_cancel_ask(callback: CallbackQuery):
+    order = await get_own_order(callback, int(callback.data.split("_")[1]))
+    if order is None:
+        return
+    if order.status != OrderStatus.NEW:
+        await callback.answer("Заказ уже принят в работу, отменить его можно через менеджера: «📞 Контакты».",
+                              show_alert=True)
+        with suppress(TelegramBadRequest):
+            await callback.message.edit_text(customer_order_text(order), reply_markup=customer_order_keyboard(order))
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=customer_cancel_confirm_keyboard(order.id))
+
+
+@client.callback_query(F.data.startswith("ucancelyes_"))
+async def customer_cancel_confirm(callback: CallbackQuery):
+    order = await get_own_order(callback, int(callback.data.split("_")[1]))
+    if order is None:
+        return
+    is_cancelled, order = await rqo.change_order_status(
+        order.id, OrderStatus.CANCELLED, "покупателем", by_customer=True
+    )
+    if not is_cancelled:
+        # Менеджер успел принять заказ, пока покупатель подтверждал отмену
+        await callback.answer("Заказ уже принят в работу, отменить его можно через менеджера: «📞 Контакты».",
+                              show_alert=True)
+    else:
+        await callback.answer("❌ Заказ отменён")
+        await notify_managers_about_cancel(callback.bot, order)
+    with suppress(TelegramBadRequest):
+        await callback.message.edit_text(customer_order_text(order), reply_markup=customer_order_keyboard(order))
+
+
+async def notify_managers_about_cancel(bot, order):
+    """Обновляет сообщение заказа в чате менеджеров и отдельно сообщает об отмене, чтобы её не пропустили"""
+    if not order.admin_message_id:
+        return
+    try:
+        await bot.edit_message_text(
+            chat_id=orders_chat_id(), message_id=order.admin_message_id,
+            text=manager_order_text(order), reply_markup=None,
+        )
+        await bot.send_message(orders_chat_id(), f"❌ Покупатель отменил заказ №{order.id}",
+                               reply_to_message_id=order.admin_message_id)
+    except Exception:
+        logger.warning("Не удалось сообщить менеджерам об отмене заказа №%s", order.id, exc_info=True)
 
 
 async def refresh_cart_message(callback: CallbackQuery):
@@ -267,6 +352,10 @@ async def card_photo_switch(callback: CallbackQuery):
         )
 
 
+def orders_chat_id() -> int:
+    return int(os.getenv("GROUP_ID"))
+
+
 def order_cooldown_left(user_id: int) -> int:
     """Сколько секунд осталось до следующего разрешённого заказа (0 — можно заказывать)"""
     ordered_at = recent_orders.get(user_id)
@@ -275,57 +364,47 @@ def order_cooldown_left(user_id: int) -> int:
     return max(1, math.ceil(ORDER_COOLDOWN_SECONDS - (time.monotonic() - ordered_at)))
 
 
-async def send_order_to_admin_chat(bot, tg_user, delivery_info: str) -> str:
-    """Оформляет заказ из корзины и возвращает текст ответа покупателю.
+async def place_order(bot, tg_user, is_pickup: bool, address: str | None):
+    """Оформляет заказ из корзины. Возвращает (текст ответа покупателю, заказ или None).
 
     Защита от двойного заказа в два слоя:
     1. Паузу между заказами бронируем до первого await — второй клик в этом процессе сразу получит отказ.
-    2. Корзину забираем атомарно в БД (take_cart_items) — даже при гонке заказ не задвоится."""
+    2. Корзина превращается в заказ атомарно в БД — даже при гонке заказ не задвоится."""
     seconds_left = order_cooldown_left(tg_user.id)
     if seconds_left:
-        return f"⏳ Вы недавно оформили заказ. Следующий можно через {seconds_left} сек."
+        return f"⏳ Вы недавно оформили заказ. Следующий можно через {seconds_left} сек.", None
     recent_orders[tg_user.id] = time.monotonic()
 
-    cart_items, total = await rqc.take_cart_items(tg_user.id)
-    if not cart_items:
+    order = await rqo.create_order_from_cart(tg_user, is_pickup, address)
+    if order is None:
         recent_orders.pop(tg_user.id, None)
-        return "🛒 Корзина пуста, добавьте товары через каталог."
+        return "🛒 Корзина пуста, добавьте товары через каталог.", None
 
-    user = await get_user(tg_user.id)
-    items_text = "\n".join(
-        f"• {item['name']} (ID {item['id']}) × {item['quantity']} = {item['total']} ₽"
-        for item in cart_items
-    )
-    username = f"@{tg_user.username}" if tg_user.username else "без username"
-    delivery_icon = "🏬" if delivery_info == PICKUP_TEXT else "🚚"
-    info = (
-        f"🆕 Новый заказ\n"
-        f"🕒 {now_msk():%d.%m.%Y %H:%M} (МСК)\n\n"
-        f"👤 {user.name}, {username} (ID: {user.tg_id})\n"
-        f"📞 {user.phone_number}\n"
-        f"{delivery_icon} {delivery_info}\n\n"
-        f"📦 Состав заказа:\n{items_text}\n\n"
-        f"💰 Итого: {total} ₽"
-    )
     try:
-        await bot.send_message(int(os.getenv("GROUP_ID")), info)
+        sent_message = await bot.send_message(
+            orders_chat_id(), manager_order_text(order), reply_markup=manager_order_keyboard(order)
+        )
     except Exception:
-        # Заказ не дошёл до админов: возвращаем товары в корзину, чтобы покупатель мог повторить
-        logger.exception("Не удалось отправить заказ пользователя %s в чат заказов", tg_user.id)
-        await rqc.restore_cart_items(tg_user.id, cart_items)
+        # Заказ не дошёл до менеджеров: удаляем его и возвращаем товары в корзину, чтобы покупатель мог повторить
+        logger.exception("Не удалось отправить заказ №%s в чат заказов", order.id)
+        await rqo.cancel_unsent_order(order)
         recent_orders.pop(tg_user.id, None)
-        return "❌ Не удалось оформить заказ, попробуйте ещё раз чуть позже."
+        return "❌ Не удалось оформить заказ, попробуйте ещё раз чуть позже.", None
 
-    logger.info("Заказ от пользователя %s на сумму %s ₽ (%s)", tg_user.id, total, delivery_info.split(",")[0])
-    return "✅ Спасибо, ваш заказ принят! Скоро с вами свяжется менеджер."
+    await rqo.set_admin_message_id(order.id, sent_message.message_id)
+    logger.info("Заказ №%s от пользователя %s на сумму %s ₽ (%s)", order.id, tg_user.id, order.total,
+                "самовывоз" if is_pickup else "доставка")
+    return (f"✅ Спасибо! Заказ №{order.id} оформлен.\n"
+            f"Мы пришлём сообщение, когда статус заказа изменится."), order
 
 
-async def finish_order(message: Message, state: FSMContext, tg_user, delivery_info: str):
-    result_text = await send_order_to_admin_chat(message.bot, tg_user, delivery_info)
-    await message.answer(result_text, reply_markup=kb.menu)
+async def finish_order(message: Message, state: FSMContext, tg_user, is_pickup: bool, address: str | None = None):
+    result_text, order = await place_order(message.bot, tg_user, is_pickup, address)
+    await message.answer(result_text, reply_markup=kb.menu)  # возвращаем главное меню вместо клавиатуры геопозиции
+    if order:
+        # Отдельным сообщением: к одному сообщению нельзя прикрепить и меню, и inline-кнопку отмены
+        await message.answer(customer_order_text(order), reply_markup=customer_order_keyboard(order))
     await state.clear()
-
-
 async def check_can_order(callback: CallbackQuery) -> bool:
     """Ранняя проверка перед вопросами о доставке, чтобы не спрашивать адрес зря"""
     seconds_left = order_cooldown_left(callback.from_user.id)
@@ -368,7 +447,7 @@ async def checkout(callback: CallbackQuery):
 @client.callback_query(F.data == "order_pickup")
 async def order_pickup(callback: CallbackQuery, state: FSMContext):
     if await check_can_order(callback):
-        await finish_order(callback.message, state, callback.from_user, PICKUP_TEXT)
+        await finish_order(callback.message, state, callback.from_user, is_pickup=True)
 
 
 @client.callback_query(F.data == "order_delivery")
@@ -397,7 +476,7 @@ async def getting_location(message: Message, state: FSMContext):
         logger.warning("Не удалось определить адрес по координатам %s", coordinates, exc_info=True)
         address = None
     address_text = str(address) if address else f"координаты {coordinates}"
-    await finish_order(message, state, message.from_user, f"Доставка, адрес: {address_text}")
+    await finish_order(message, state, message.from_user, is_pickup=False, address=address_text)
 
 
 @client.message(
@@ -410,7 +489,7 @@ async def getting_address_manually(message: Message, state: FSMContext):
             f"❌ Адрес должен быть от {ADDRESS_MIN_LENGTH} до {ADDRESS_MAX_LENGTH} символов. Введите снова:"
         )
         return
-    await finish_order(message, state, message.from_user, f"Доставка, адрес: {address}")
+    await finish_order(message, state, message.from_user, is_pickup=False, address=address)
 
 
 @client.message(StateFilter("waiting_for_address"))  # Стикер, фото и т.п. вместо адреса

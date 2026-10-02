@@ -118,27 +118,27 @@ async def catalog(event: Message | CallbackQuery):
 @client.callback_query(F.data.startswith("category_"))
 async def cards(callback: CallbackQuery):
     await callback.answer()
-    category_name = callback.data.split("_")[1]
-    try:
-        await callback.message.edit_text(
-            "Выберите товар", reply_markup=await kb.cards(category_name)
-        )
-    except:
+    category_id = int(callback.data.split("_")[1])
+    keyboard = await kb.cards(category_id)
+    if callback.message.photo:  # из карточки товара: фото нельзя превратить в текст
         await callback.message.delete()
-        await callback.message.edit_text(
-            "Выберите товар", reply_markup=await kb.cards(category_name)
-        )
+        await callback.message.answer("Выберите товар", reply_markup=keyboard)
+    else:
+        await callback.message.edit_text("Выберите товар", reply_markup=keyboard)
 
 
 @client.callback_query(F.data.startswith("card_"))
 async def card_info(callback: CallbackQuery):
     await callback.answer()
-    card_id = callback.data.split("_")[1]
+    card_id = int(callback.data.split("_")[1])
     card = await get_card(card_id)
+    if not card:
+        await callback.message.answer("Этот товар больше не продаётся.")
+        return
     await callback.message.answer_photo(
         photo=card.image,
         caption=f"{card.name}\n\n{card.description}\n\n{card.price}RUB",
-        reply_markup=await kb.back_to_categories(card.category_name, card_id),
+        reply_markup=await kb.back_to_categories(card.category_id, card_id),
     )
 
 
@@ -158,7 +158,7 @@ async def send_order_to_admin_chat(bot, tg_user, card_id, delivery_info: str):
 @client.callback_query(F.data.startswith("buy_"))
 async def client_buy_callback(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    card_id = callback.data.split("_")[1]
+    card_id = int(callback.data.split("_")[1])
     await state.update_data(card_id=card_id)
     await callback.message.answer(
         "Как вы хотите получить заказ?", reply_markup=kb.delivery_choice

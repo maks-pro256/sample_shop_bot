@@ -25,7 +25,7 @@ class User(Base):
     __tablename__ = 'users'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    tg_id = mapped_column(BigInteger)
+    tg_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     name: Mapped[str] = mapped_column(String(25), nullable=True)
     phone_number: Mapped[str] = mapped_column(String(25), nullable=True)
 
@@ -34,7 +34,7 @@ class Category(Base):
     __tablename__ = 'categories'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(25))
+    name: Mapped[str] = mapped_column(String(25), unique=True)
 
 
 class Card(Base):
@@ -45,15 +45,15 @@ class Card(Base):
     description: Mapped[str] = mapped_column(String(256))
     price: Mapped[int]
     image: Mapped[str] = mapped_column(String(256))
-    category_name: Mapped[str] = mapped_column(ForeignKey('categories.name'))
+    category_id: Mapped[int] = mapped_column(ForeignKey('categories.id', ondelete='CASCADE'))
 
 
 class Cart(Base):
     __tablename__ = "carts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('users.tg_id'))  # Telegram ID пользователя
-    items: Mapped[dict] = mapped_column(JSON, default={})  # {"card_id": количество}
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('users.tg_id'), unique=True)  # Telegram ID пользователя
+    items: Mapped[dict] = mapped_column(JSON, default=dict)  # {"card_id": количество}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

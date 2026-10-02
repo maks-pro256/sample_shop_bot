@@ -75,8 +75,8 @@ async def add_card_category(callback: CallbackQuery, state: FSMContext):
 @admin.callback_query(F.data.startswith("categoryes_"))
 async def add_card_name(callback: CallbackQuery, state: FSMContext):
     await callback.answer("")
-    category = callback.data.split("_")[1]
-    await state.update_data(category=category)
+    category_id = int(callback.data.split("_")[1])
+    await state.update_data(category_id=category_id)
     await callback.message.answer("Введите название товара:")
     await state.set_state(kb.AddCard.name)
 
@@ -90,7 +90,11 @@ async def add_card_price(message: Message, state: FSMContext):
 
 @admin.message(kb.AddCard.price)
 async def add_card_description(message: Message, state: FSMContext):
-    await state.update_data(price=message.text.strip())
+    price = (message.text or "").strip()
+    if not price.isdigit():
+        await message.answer("❌ Цена должна быть целым числом. Введите снова:")
+        return
+    await state.update_data(price=int(price))
     await message.answer("Напишите описание товара:")
     await state.set_state(kb.AddCard.description)
 
@@ -102,19 +106,23 @@ async def add_card_photo(message: Message, state: FSMContext):
     await state.set_state(kb.AddCard.photo)
 
 
-@admin.message(kb.AddCard.photo)
+@admin.message(kb.AddCard.photo, F.photo)
 async def add_card_(message: Message, state: FSMContext):
     await state.update_data(photo=message.photo[-1].file_id)
     data = await state.get_data()
-    try:
-        await rq.add_card_database(
-            data["category"], data["name"], data["price"], data["description"], data["photo"]
-        )
+    is_added = await rq.add_card_database(
+        data["category_id"], data["name"], data["price"], data["description"], data["photo"]
+    )
+    if is_added:
         await message.answer("Карточка успешно создана!")
-        await state.clear()
-    except Exception as e:
-        await message.answer(f"Произошла ошибка '{e}'.")
-        await state.clear()
+    else:
+        await message.answer("❌ Не удалось создать карточку, подробности в логах.")
+    await state.clear()
+
+
+@admin.message(kb.AddCard.photo)
+async def add_card_photo_invalid(message: Message):
+    await message.answer("❌ Нужна именно фотография. Отправьте фото товара:")
 
 
 @admin.callback_query(F.data == "remove_product")
@@ -133,17 +141,17 @@ async def delete_card(callback: CallbackQuery):
 @admin.callback_query(F.data.startswith("cat_"))
 async def get_category_name(callback: CallbackQuery):
     await callback.answer("")
-    category = callback.data.split("_")[1]
+    category_id = int(callback.data.split("_")[1])
     await callback.message.answer("Выберите карточку для удаления:",
-                                  reply_markup=await kb.cards_admin(category))
+                                  reply_markup=await kb.cards_admin(category_id))
 
 
 @admin.callback_query(F.data.startswith("carda_"))
 async def get_card_name(callback: CallbackQuery):
     await callback.answer("")
-    card = callback.data.split("_")[1]
+    card_id = int(callback.data.split("_")[1])
     try:
-        await rq.del_card_database(card)
+        await rq.del_card_database(card_id)
         await callback.message.answer("Успешно удалено!")
     except Exception as e:
         await callback.message.answer(f"Произошла ошибка '{e}'.")
@@ -161,12 +169,12 @@ async def del_category_name(callback: CallbackQuery):
 @admin.callback_query(F.data.startswith("cate_"))
 async def del_category(callback: CallbackQuery):
     await callback.answer("")
-    name = callback.data.split("_")[1]
-    await rq.delete_category_database(name)
+    category_id = int(callback.data.split("_")[1])
     try:
+        await rq.delete_category_database(category_id)
         await callback.message.answer("Успешно удалено!")
     except Exception as e:
-        await callback.message.answer("Не удалось удалить, ошибка: '{e}'")
+        await callback.message.answer(f"Не удалось удалить, ошибка: '{e}'")
 
 MAX_DESCRIPTION_LENGTH = 1000
 

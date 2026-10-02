@@ -156,13 +156,13 @@ async def categories_admin_2del():
     all_categories = await get_categories()
     for category in all_categories:
         Keyboard.add(InlineKeyboardButton(text=category.name,
-                                          callback_data=f'cate_{category.name}'))
+                                          callback_data=f'cate_{category.id}'))
     return Keyboard.adjust(2).as_markup()
 
 
-async def cards(category_name):
+async def cards(category_id: int):
     keyboard = InlineKeyboardBuilder()
-    all_cards = await get_cards_by_category(category_name)
+    all_cards = await get_cards_by_category(category_id)
     for card in all_cards:
         keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price}RUB',
                                           callback_data=f'card_{card.id}'))
@@ -171,9 +171,9 @@ async def cards(category_name):
     return keyboard.as_markup()
 
 
-async def cards_admin(category_name):
+async def cards_admin(category_id: int):
     keyboard = InlineKeyboardBuilder()
-    all_cards = await get_cards_by_category(category_name)
+    all_cards = await get_cards_by_category(category_id)
     for card in all_cards:
         keyboard.row(InlineKeyboardButton(text=f'{card.name} | {card.price}RUB',
                                           callback_data=f'carda_{card.id}'))
@@ -182,10 +182,10 @@ async def cards_admin(category_name):
     return keyboard.as_markup()
 
 
-async def back_to_categories(category_name, card_id):
+async def back_to_categories(category_id: int, card_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text='Купить', callback_data=f'buy_{card_id}')],
         [InlineKeyboardButton(
-            text='Назад', callback_data=f'category_{category_name}')]
+            text='Назад', callback_data=f'category_{category_id}')]
     ])
 

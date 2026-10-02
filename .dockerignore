@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+venv
+.env
+*.env
+__pycache__
+*.py[cod]
+*.db
+*.sqlite3
+*.log
+.vscode
+.claude
+Dockerfile
+docker-compose.yml
+startbot.sh

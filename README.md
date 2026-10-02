@@ -46,7 +46,23 @@
 - `app/database/requests_cart.py` — базовая логика корзины.
 - `requirements.txt` — список зависимостей проекта.
 
-## Установка
+## Запуск в Docker (рекомендуется)
+
+Бот и PostgreSQL поднимаются одной командой, база хранится в volume `postgres_data`.
+
+1. Скопируйте `.env.example` в `.env` и заполните `TG_TOKEN`, `GROUP_ID`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`. `DB_URL` в Docker собирается автоматически.
+2. Соберите и запустите:
+   ```bash
+   docker compose up -d --build
+   ```
+3. Полезные команды:
+   ```bash
+   docker compose logs -f bot   # логи бота
+   docker compose restart bot   # перезапуск после изменения .env
+   docker compose down          # остановка (данные БД сохраняются)
+   ```
+
+## Установка без Docker
 
 1. Клонируйте репозиторий:
    ```bash
@@ -83,7 +99,8 @@
 ## Переменные окружения
 
 - `TG_TOKEN` — токен Telegram-бота.
-- `DB_URL` — строка подключения к базе данных (SQLite через `aiosqlite` или PostgreSQL через `asyncpg`).
+- `DB_URL` — строка подключения к базе данных (SQLite через `aiosqlite` или PostgreSQL через `asyncpg`). В Docker задаётся автоматически.
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` — доступ к PostgreSQL в docker compose.
 - `GROUP_ID` — ID чата или группы, куда отправляются уведомления о заказах. Участники этой группы получают доступ к админ-панели, поэтому бот должен быть добавлен в группу.
 
 ## Как расширять шаблон

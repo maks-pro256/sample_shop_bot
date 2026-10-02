@@ -1,8 +1,35 @@
+# Секретные файлы и конфигурации
 .env
-database.db
-__pycache__
-.bash_history
-.bashrc
+config.json
+*.env
+
+# Виртуальные окружения
+venv/
+env/
+ENV/
+.venv/
+
+# Кэш и скомпилированные файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache
+
+# Настройки редактора VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Логи и базы данных (если локальные)
 *.log
-*.tmp
-*.swp
+*.sqlite3
+*.db
+
+# Прочее
+.DS_Store
+Thumbs.db
+.claude

@@ -10,6 +10,10 @@ class AddCategory(StatesGroup):
     waiting_for_title = State()
 
 
+class EditShopDescription(StatesGroup):
+    waiting_for_text = State()
+
+
 class AddCard(StatesGroup):
     category = State()
     name = State()
@@ -69,7 +73,16 @@ def get_cart_keyboard(cart_items: list):
 inline_admin_panel = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="Добавить что-то", callback_data='add_product')], 
-        [InlineKeyboardButton(text="Удалить что-то", callback_data="remove_product")]]
+        [InlineKeyboardButton(text="Удалить что-то", callback_data="remove_product")],
+        [InlineKeyboardButton(text="Изменить описание магазина", callback_data="edit_shop_description")]]
+)
+
+
+delivery_choice = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="🚚 Доставка", callback_data="order_delivery")],
+        [InlineKeyboardButton(text="🏬 Самовывоз", callback_data="order_pickup")]
+    ]
 )
 
 

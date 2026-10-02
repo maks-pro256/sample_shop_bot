@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 
-from app.database.requests import set_user, update_user, get_card, get_user
+from app.database.requests import set_user, update_user, get_card, get_user, get_shop_description
 import app.keyboards as kb
 import app.database.requests_cart as rqc
 from app.validation import validation_phone
@@ -39,7 +39,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await state.set_state("req_name")
     else:  # Если есть юзер
         await message.answer(
-            "Добро пожаловать в магазин одежды! \n\nИспользуя кнопки ниже, ознакомьтесь с ассортиментом",
+            f"{await get_shop_description()}\n\nИспользуя кнопки ниже, ознакомьтесь с ассортиментом",
             reply_markup=kb.menu,
         )
 
@@ -142,12 +142,50 @@ async def card_info(callback: CallbackQuery):
     )
 
 
+async def send_order_to_admin_chat(bot, tg_user, card_id, delivery_info: str):
+    """Собирает заказ и отправляет его в чат, указанный в GROUP_ID"""
+    user = await get_user(tg_user.id)
+    info = (
+        f"Новый заказ:\n\n"
+        f"Пользователь: {user.name}, @{tg_user.username} (ID: {user.tg_id})\n"
+        f"Номер телефона: {user.phone_number}\n"
+        f"Получение: {delivery_info}\n"
+        f"ID товара: {card_id}"
+    )
+    await bot.send_message(int(os.getenv("GROUP_ID")), info)
+
+
 @client.callback_query(F.data.startswith("buy_"))
 async def client_buy_callback(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     card_id = callback.data.split("_")[1]
-    await state.set_state("waiting_for_address")
     await state.update_data(card_id=card_id)
+    await callback.message.answer(
+        "Как вы хотите получить заказ?", reply_markup=kb.delivery_choice
+    )
+
+
+@client.callback_query(F.data == "order_pickup")
+async def order_pickup(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    card_id = (await state.get_data()).get("card_id")
+    if not card_id:  # кнопка из старого сообщения, товар уже неизвестен
+        await callback.message.answer("Выберите товар заново через каталог.")
+        return
+    await send_order_to_admin_chat(
+        callback.bot, callback.from_user, card_id, "Самовывоз"
+    )
+    await callback.message.answer("Спасибо, ваш заказ принят!", reply_markup=kb.menu)
+    await state.clear()
+
+
+@client.callback_query(F.data == "order_delivery")
+async def order_delivery(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    if not (await state.get_data()).get("card_id"):
+        await callback.message.answer("Выберите товар заново через каталог.")
+        return
+    await state.set_state("waiting_for_address")
     await callback.message.answer(
         "Отправьте ваш адрес доставки.\nПример: г. Санкт-Петербург, ул. Колотушкина д.12, к/лит, кв. 1",
         reply_markup=await kb.clients_location(),
@@ -164,18 +202,9 @@ async def getting_location(message: Message, state: FSMContext):
         exactly_one=True,
         language="ru",
     )
-    user = await get_user(message.from_user.id)
-    card_id = data.get("card_id")
-
-    info = (
-        f"Новый заказ:\n\n"
-        f"Пользователь: {user.name}, @{message.from_user.username} (ID: {user.tg_id})\n"
-        f"Номер телефона: {user.phone_number}\n"
-        f"Адрес, куда доставить: {address}\n"
-        f"ID товара: {card_id}"
+    await send_order_to_admin_chat(
+        message.bot, message.from_user, data.get("card_id"), f"Доставка, адрес: {address}"
     )
-
-    await message.bot.send_message(int(os.getenv("GROUP_ID")), info)
     await message.answer("Спасибо, ваш заказ принят!", reply_markup=kb.menu)
     await state.clear()
 
@@ -183,20 +212,10 @@ async def getting_location(message: Message, state: FSMContext):
 @client.message(
     StateFilter("waiting_for_address")
 )  # Получение адреса вручную и обработка заказа
-async def getting_locarion(message: Message, state: FSMContext):
+async def getting_address_manually(message: Message, state: FSMContext):
     data = await state.get_data()
-    address = message.text
-    user = await get_user(message.from_user.id)
-    card_id = data.get("card_id")
-
-    info = (
-        f"Новый заказ:\n\n"
-        f"Пользователь: {user.name}, @{message.from_user.username} (ID: {user.tg_id})\n"
-        f"Номер телефона: {user.phone_number}\n"
-        f"Адрес, куда доставить: {address}\n"
-        f"ID товара: {card_id}"
+    await send_order_to_admin_chat(
+        message.bot, message.from_user, data.get("card_id"), f"Доставка, адрес: {message.text}"
     )
-
-    await message.bot.send_message(int(os.getenv("GROUP_ID")), info)
     await message.answer("Спасибо, ваш заказ принят!", reply_markup=kb.menu)
     await state.clear()

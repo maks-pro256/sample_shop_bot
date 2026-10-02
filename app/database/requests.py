@@ -1,5 +1,15 @@
-from app.database.models import async_session, Category, Card, User
+from app.database.models import async_session, Category, Card, User, ShopSetting
 from sqlalchemy import select, update
+
+
+SHOP_DESCRIPTION_KEY = "description"
+DEFAULT_SHOP_DESCRIPTION = "Добро пожаловать в наш магазин!"
+
+
+async def get_shop_description() -> str:
+    async with async_session() as session:
+        setting = await session.get(ShopSetting, SHOP_DESCRIPTION_KEY)
+        return setting.value if setting else DEFAULT_SHOP_DESCRIPTION
 
 
 async def set_user(tg_id):

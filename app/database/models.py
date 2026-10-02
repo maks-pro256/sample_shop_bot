@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from datetime import datetime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import BigInteger, String, ForeignKey, JSON, DateTime
+from sqlalchemy import BigInteger, String, ForeignKey, JSON, DateTime, Text
 import os
 
 
@@ -56,6 +56,14 @@ class Cart(Base):
     items: Mapped[dict] = mapped_column(JSON, default={})  # {"card_id": количество}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ShopSetting(Base):
+    """Настройки магазина, которые админ меняет из бота (ключ -> значение)"""
+    __tablename__ = "shop_settings"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
 
 
 async def init_models():

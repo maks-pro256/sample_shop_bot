@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 import app.keyboards as kb
 import app.database.requests_admin as rq
+from app.database.requests import get_shop_description
 import logging
 
 
@@ -163,3 +164,29 @@ async def del_category(callback: CallbackQuery):
         await callback.message.answer("Успешно удалено!")
     except Exception as e:
         await callback.message.answer("Не удалось удалить, ошибка: '{e}'")
+
+MAX_DESCRIPTION_LENGTH = 1000
+
+
+@admin.callback_query(F.data == "edit_shop_description")
+async def edit_shop_description_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("")
+    current_description = await get_shop_description()
+    await callback.message.answer(
+        f"Текущее описание:\n\n{current_description}\n\n"
+        f"Отправьте новый текст (до {MAX_DESCRIPTION_LENGTH} символов):"
+    )
+    await state.set_state(kb.EditShopDescription.waiting_for_text)
+
+
+@admin.message(kb.EditShopDescription.waiting_for_text, F.text)
+async def edit_shop_description_save(message: Message, state: FSMContext):
+    new_description = message.text.strip()
+    if not new_description or len(new_description) > MAX_DESCRIPTION_LENGTH:
+        await message.answer(
+            f"❌ Описание должно быть от 1 до {MAX_DESCRIPTION_LENGTH} символов. Введите снова:"
+        )
+        return
+    await rq.set_shop_description(new_description)
+    await message.answer("✅ Описание магазина обновлено!")
+    await state.clear()

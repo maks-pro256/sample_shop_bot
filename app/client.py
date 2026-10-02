@@ -12,7 +12,7 @@ import app.keyboards as kb
 import app.database.requests_cart as rqc
 import app.database.requests_orders as rqo
 from app.orders import (
-    OrderStatus, customer_order_keyboard, customer_order_text, customer_orders_list,
+    OrderStatus, ACTIVE_STATUSES, FINISHED_STATUSES, customer_order_keyboard, customer_order_text, customer_orders_list,
     customer_cancel_confirm_keyboard, manager_order_keyboard, manager_order_text,
 )
 from app.validation import clean_name, clean_text, normalize_phone, ADDRESS_MIN_LENGTH, ADDRESS_MAX_LENGTH
@@ -138,16 +138,21 @@ async def get_cart_user(message: Message):
     await message.answer(text, reply_markup=keyboard)
 
 
+async def orders_list_for(user_id: int, is_history: bool):
+    statuses = FINISHED_STATUSES if is_history else ACTIVE_STATUSES
+    return customer_orders_list(await rqo.get_user_orders(user_id, statuses), is_history)
+
+
 @client.message(F.text == kb.BTN_ORDERS)
 async def my_orders(message: Message):
-    text, keyboard = customer_orders_list(await rqo.get_user_orders(message.from_user.id))
+    text, keyboard = await orders_list_for(message.from_user.id, is_history=False)
     await message.answer(text, reply_markup=keyboard)
 
 
-@client.callback_query(F.data == "myorders")
-async def my_orders_back(callback: CallbackQuery):
+@client.callback_query(F.data.in_({"myorders", "myorders_history"}))
+async def my_orders_switch(callback: CallbackQuery):
     await callback.answer()
-    text, keyboard = customer_orders_list(await rqo.get_user_orders(callback.from_user.id))
+    text, keyboard = await orders_list_for(callback.from_user.id, is_history=callback.data == "myorders_history")
     with suppress(TelegramBadRequest):
         await callback.message.edit_text(text, reply_markup=keyboard)
 

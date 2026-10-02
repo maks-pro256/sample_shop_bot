@@ -58,10 +58,13 @@ async def get_order(order_id: int) -> Order | None:
         return await session.get(Order, order_id)
 
 
-async def get_user_orders(user_id: int, limit: int = 10) -> list[Order]:
+async def get_user_orders(user_id: int, statuses: set[OrderStatus], limit: int = 10) -> list[Order]:
     async with async_session() as session:
         orders = await session.scalars(
-            select(Order).where(Order.user_id == user_id).order_by(Order.id.desc()).limit(limit)
+            select(Order)
+            .where(Order.user_id == user_id, Order.status.in_(list(statuses)))
+            .order_by(Order.id.desc())
+            .limit(limit)
         )
         return list(orders)
 

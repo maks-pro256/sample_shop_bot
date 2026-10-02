@@ -10,7 +10,7 @@ from app.client import client
 from app.admin import admin
 from app.manager import manager
 from app.database.models import init_models
-from app.middlewares import ThrottlingMiddleware
+from app.middlewares import RetryNetworkErrorsMiddleware, ThrottlingMiddleware
 from app.timezone import MSK
 
 
@@ -34,6 +34,7 @@ logger = logging.getLogger("shop_bot")
 
 async def main():
     bot = Bot(token=os.getenv("TG_TOKEN"))
+    bot.session.middleware(RetryNetworkErrorsMiddleware())
 
     # События одного пользователя обрабатываются строго по очереди:
     # иначе фото из альбома, пришедшие одновременно, затирают друг друга в FSM

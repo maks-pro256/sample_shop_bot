@@ -22,6 +22,9 @@ NEXT_STATUS = {
 }
 CANCELLABLE_BY_MANAGER = {OrderStatus.NEW, OrderStatus.ACCEPTED, OrderStatus.READY}
 CANCELLABLE_BY_CUSTOMER = {OrderStatus.NEW}
+# Активные — в «Мои заказы»; выполненные и отменённые уходят в историю, чтобы список не копился
+ACTIVE_STATUSES = {OrderStatus.NEW, OrderStatus.ACCEPTED, OrderStatus.READY}
+FINISHED_STATUSES = {OrderStatus.COMPLETED, OrderStatus.CANCELLED}
 
 
 def can_change_status(current: OrderStatus, new: OrderStatus, by_customer: bool = False) -> bool:
@@ -137,7 +140,9 @@ def customer_order_keyboard(order) -> InlineKeyboardMarkup:
     rows = []
     if order.status == OrderStatus.NEW:
         rows.append([InlineKeyboardButton(text="❌ Отменить заказ", callback_data=f"ucancel_{order.id}")])
-    rows.append([InlineKeyboardButton(text="🔙 Мои заказы", callback_data="myorders")])
+    # «Назад» ведёт в тот список, где этот заказ виден
+    back_callback = "myorders" if order.status in ACTIVE_STATUSES else "myorders_history"
+    rows.append([InlineKeyboardButton(text="🔙 К списку заказов", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -148,9 +153,8 @@ def customer_cancel_confirm_keyboard(order_id: int) -> InlineKeyboardMarkup:
     ]])
 
 
-def customer_orders_list(orders: list) -> tuple[str, InlineKeyboardMarkup | None]:
-    if not orders:
-        return "📦 У вас пока нет заказов.", None
+def customer_orders_list(orders: list, is_history: bool = False) -> tuple[str, InlineKeyboardMarkup]:
+    """Список заказов покупателя: активные (по умолчанию) или история — выполненные и отменённые"""
     rows = [
         [InlineKeyboardButton(
             text=f"№{order.id} · {order.total} ₽ · {status_label(order.status, order.is_pickup)}",
@@ -158,6 +162,12 @@ def customer_orders_list(orders: list) -> tuple[str, InlineKeyboardMarkup | None
         )]
         for order in orders
     ]
-    text = (f"📦 Ваши последние заказы ({len(orders)}). Нажмите на заказ, чтобы открыть подробности.\n\n"
-            f"{CANCEL_HINT}")
+    if is_history:
+        text = (f"🗂 История заказов (последние {len(orders)})." if orders
+                else "🗂 В истории пока нет заказов.")
+        rows.append([InlineKeyboardButton(text="📦 Активные заказы", callback_data="myorders")])
+    else:
+        text = (f"📦 Ваши активные заказы ({len(orders)}). Нажмите на заказ, чтобы открыть подробности.\n\n"
+                f"{CANCEL_HINT}" if orders else "📦 Активных заказов нет.")
+        rows.append([InlineKeyboardButton(text="🗂 История заказов", callback_data="myorders_history")])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)

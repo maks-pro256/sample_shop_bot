@@ -1,10 +1,51 @@
+import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from aiogram import BaseMiddleware
+from aiogram import BaseMiddleware, Bot
+from aiogram.client.session.middlewares.base import BaseRequestMiddleware, NextRequestMiddlewareType
+from aiogram.exceptions import TelegramNetworkError
+from aiogram.methods import GetUpdates, TelegramMethod
+from aiogram.methods.base import Response, TelegramType
 from aiogram.types import CallbackQuery, Message
 from cachetools import TTLCache
+
+
+logger = logging.getLogger(__name__)
+
+
+class RetryNetworkErrorsMiddleware(BaseRequestMiddleware):
+    """Повторяет запрос к Telegram API при обрыве соединения (TelegramNetworkError, «Connection reset by peer»).
+
+    Повторяются только безопасные методы: чтение, ответ на нажатие кнопки, редактирование и удаление.
+    Отправку сообщений не повторяем: если запрос дошёл, а оборвался только ответ, повтор продублирует сообщение.
+    """
+
+    SAFE_METHOD_PREFIXES = ("Get", "Answer", "Edit", "Delete")
+
+    def __init__(self, attempts: int = 3, delay: float = 0.5):
+        self.attempts = attempts
+        self.delay = delay
+
+    async def __call__(
+        self,
+        make_request: NextRequestMiddlewareType[TelegramType],
+        bot: Bot,
+        method: TelegramMethod[TelegramType],
+    ) -> Response[TelegramType]:
+        method_name = type(method).__name__
+        # getUpdates у polling своя логика повторов
+        is_safe = method_name.startswith(self.SAFE_METHOD_PREFIXES) and not isinstance(method, GetUpdates)
+        for attempt in range(1, self.attempts + 1):
+            try:
+                return await make_request(bot, method)
+            except TelegramNetworkError:
+                if not is_safe or attempt == self.attempts:
+                    raise
+                logger.warning("Сбой сети при %s, повтор %s/%s", method_name, attempt, self.attempts - 1)
+                await asyncio.sleep(self.delay * attempt)
 
 
 class ThrottlingMiddleware(BaseMiddleware):

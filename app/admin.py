@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 
-import app.keyborads as kb
+import app.keyboards as kb
 import app.database.requests_admin as rq
 import logging
 

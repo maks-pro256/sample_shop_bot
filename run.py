@@ -9,10 +9,6 @@ from app.admin import admin
 from app.database.models import init_models
 
 
-from aiogram.fsm.storage.redis import RedisStorage
-import redis.asyncio as aioredis
-
-
 from dotenv import load_dotenv
 
 
@@ -27,13 +23,7 @@ logging.basicConfig(
 async def main():
     bot = Bot(token=os.getenv("TG_TOKEN"))
 
-    # redis_host = os.getenv("REDIS_HOST", "localhost")
-    # redis_port = os.getenv("REDIS_PORT", "6379")
-    # redis_db = os.environ["REDIS_DB"]
-
-    # redis = await aioredis.from_url(f"redis://{redis_host}:{redis_port}/{redis_db}")
-
-    dp = Dispatcher()# storage=RedisStorage(redis))
+    dp = Dispatcher()
     dp.include_router(client)
     dp.include_router(admin)
     dp.startup.register(startup)

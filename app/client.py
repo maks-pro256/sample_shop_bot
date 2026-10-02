@@ -5,9 +5,9 @@ from aiogram.fsm.context import FSMContext
 
 
 from app.database.requests import set_user, update_user, get_card, get_user
-import app.keyborads as kb
+import app.keyboards as kb
 import app.database.requests_cart as rqc
-from app.validtion import validation_phone
+from app.validation import validation_phone
 
 
 import os

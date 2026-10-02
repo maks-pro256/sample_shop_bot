@@ -4,7 +4,6 @@ from sqlalchemy import select, insert, delete, func
 from sqlalchemy.exc import SQLAlchemyError,IntegrityError
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

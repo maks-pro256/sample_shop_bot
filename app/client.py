@@ -12,6 +12,7 @@ from app.validation import validation_phone
 
 
 import asyncio
+import logging
 from contextlib import suppress
 import os
 from dotenv import load_dotenv
@@ -25,6 +26,7 @@ from geopy.geocoders import Nominatim
 
 
 client = Router()
+logger = logging.getLogger(__name__)
 
 
 ctx = ssl.create_default_context(cafile=certifi.where())
@@ -234,6 +236,7 @@ async def send_order_to_admin_chat(bot, tg_user, delivery_info: str) -> bool:
     )
     await bot.send_message(int(os.getenv("GROUP_ID")), info)
     await rqc.clear_cart(tg_user.id)
+    logger.info("Заказ от пользователя %s на сумму %s RUB (%s)", tg_user.id, total, delivery_info.split(",")[0])
     return True
 
 

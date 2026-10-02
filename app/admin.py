@@ -19,7 +19,6 @@ admin.message.filter(IsAdmin())
 admin.callback_query.filter(IsAdmin())
 
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 

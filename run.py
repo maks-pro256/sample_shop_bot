@@ -16,8 +16,11 @@ load_dotenv()
 
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
+logger = logging.getLogger("shop_bot")
 
 
 async def main():
@@ -33,15 +36,15 @@ async def main():
 
 async def startup(dispatcher: Dispatcher):
     await init_models()
-    logging.info("Bot started up...")
+    logger.info("Бот запущен")
 
 
 async def shutdown(dispatcher: Dispatcher):
-    logging.info("Bot shutting down...")
+    logger.info("Бот останавливается")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("Bot stopped")
+        logger.info("Бот остановлен")

@@ -11,7 +11,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-engine = create_async_engine(url=os.getenv("DB_URL"), echo=True)
+# DB_ECHO=true пишет в лог каждый SQL-запрос, нужно только для отладки
+engine = create_async_engine(
+    url=os.getenv("DB_URL"),
+    echo=os.getenv("DB_ECHO", "false").lower() == "true",
+)
 
 
 async_session = async_sessionmaker(engine)
